@@ -843,11 +843,25 @@ function initParticles(){
 /* ===================================================
    INICIALIZACIÓN
    =================================================== */
+/* Datos iniciales embebidos — se cargan automáticamente la primera vez */
+const SEED={cuentas:[{id:"c_banco806",banco:"Bancolombia 806",alias:"Bancolombia 806",tipo:"Ahorros",color:"#FFD600"},{id:"c_banco4321",banco:"Bancolombia 4321",alias:"Bancolombia 4321",tipo:"Ahorros",color:"#FFB300"},{id:"c_daviplata",banco:"Daviplata",alias:"Daviplata",tipo:"Billetera digital",color:"#ED1C24"},{id:"c_nequi",banco:"Nequi",alias:"Nequi",tipo:"Billetera digital",color:"#FF3D00"},{id:"c_dolarapp",banco:"DolarApp",alias:"DolarApp",tipo:"Billetera digital",color:"#00d4ff"},{id:"c_dale",banco:"Dale",alias:"Dale",tipo:"Billetera digital",color:"#7b2fff"},{id:"c_nu",banco:"Nu",alias:"Nu",tipo:"Ahorros",color:"#820AD1"},{id:"c_lulo",banco:"Lulo",alias:"Lulo Bank",tipo:"Ahorros",color:"#00d48a"},{id:"c_claropay",banco:"Claro Pay",alias:"Claro Pay",tipo:"Billetera digital",color:"#ff8c00"}],saldos:[{id:"s_b806",cuentaId:"c_banco806",fecha:"2026-05-12",monto:445579,nota:"Principal $83.579 + Fondo Emergencias $144.000 + Generación de Riqueza $218.000"},{id:"s_b4321",cuentaId:"c_banco4321",fecha:"2026-05-12",monto:4137,nota:"Principal $140 + ICONE Academy $3.997"},{id:"s_davi",cuentaId:"c_daviplata",fecha:"2026-05-12",monto:12265,nota:"Principal $4.739 + Viajes $5.526 + Bendiciones Poli $2.000"},{id:"s_nequi",cuentaId:"c_nequi",fecha:"2026-05-12",monto:1291726,nota:"Principal $386.726 + Activos Pasivos $405.000 + Bendiciones Poli $500.000"},{id:"s_dolar",cuentaId:"c_dolarapp",fecha:"2026-05-12",monto:0,nota:"Saldo Principal"},{id:"s_dale",cuentaId:"c_dale",fecha:"2026-05-12",monto:1073523,nota:"Principal $191.298 + Bendiciones Poli $882.225"},{id:"s_nu",cuentaId:"c_nu",fecha:"2026-05-12",monto:241882,nota:"Principal $4.119 + Mi primera Cajita $1.005 + Acumulación Riqueza $705 + Bendiciones Poli $235.854 + Provisión Pagos $199"},{id:"s_lulo",cuentaId:"c_lulo",fecha:"2026-05-12",monto:690499,nota:"Principal $24.148 + Ahorros $81.800 + Fondo de imprevistos $406.299 + Bendiciones Poli $897 + Dólares $177.355"},{id:"s_claro",cuentaId:"c_claropay",fecha:"2026-05-12",monto:773,nota:"Saldo Principal"}],ingresos:[],egresos:[]};
+const SEED_MODULES=[{id:"cm_bendiciones",label:"Bendiciones Poli",icon:"🙏",type:"meta",objetivo:5200000,items:[{id:"bp1",fecha:"2026-05-12",monto:2000,concepto:"Daviplata",nota:""},{id:"bp2",fecha:"2026-05-12",monto:500000,concepto:"Nequi",nota:""},{id:"bp3",fecha:"2026-05-12",monto:882225,concepto:"Dale",nota:""},{id:"bp4",fecha:"2026-05-12",monto:235854,concepto:"Nu",nota:""},{id:"bp5",fecha:"2026-05-12",monto:897,concepto:"Lulo",nota:""}]},{id:"cm_fondoemergencias",label:"Fondo Emergencias",icon:"🚨",type:"meta",objetivo:1440389,items:[{id:"fe1",fecha:"2026-05-12",monto:144000,concepto:"Bancolombia 806",nota:""},{id:"fe2",fecha:"2026-05-12",monto:406299,concepto:"Lulo — Fondo imprevistos",nota:""}]},{id:"cm_generacionriqueza",label:"Generación de Riqueza",icon:"📈",type:"meta",objetivo:1000000,items:[{id:"gr1",fecha:"2026-05-12",monto:218000,concepto:"Bancolombia 806",nota:""},{id:"gr2",fecha:"2026-05-12",monto:705,concepto:"Nu — Acumulación",nota:""}]}];
+
+function autoSeed(){
+  if(localStorage.getItem(STORE_KEY))return false; // ya tiene datos
+  Object.assign(S,SEED);
+  modulesCustom=SEED_MODULES;
+  saveState();
+  return true;
+}
+
 (async function init(){
+  const seeded=autoSeed();
   loadState();
   await openDB();
   initParticles();
   rerender();
+  if(seeded)setTimeout(()=>toast('✓ Saldos iniciales cargados ($3.760.384)'),600);
 })();
 </script>
 </body>
