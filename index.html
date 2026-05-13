@@ -461,13 +461,17 @@ registerModule({
         ${S.cuentas.map(c=>{
           const ult=S.saldos.filter(s=>s.cuentaId===c.id).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
           const nregs=S.saldos.filter(s=>s.cuentaId===c.id).length;
+          const bols=ult&&ult.bolsillos?ult.bolsillos.filter(b=>b.m>0):[];
           return `<div class="card" style="border-left:4px solid ${c.color||'#00d4ff'};display:flex;flex-direction:column">
             <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
               <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:1.05rem">${c.alias||c.banco}</div><div style="color:var(--muted);font-size:.78rem">${c.tipo}</div></div>
               <div style="display:flex;gap:6px"><button class="btn btn-icon btn-sm btn-ghost" onclick="formCuenta('${c.id}')" title="Editar">✎</button><button class="btn btn-icon btn-sm btn-ghost" onclick="delCuenta('${c.id}')" title="Eliminar">🗑</button></div>
             </div>
-            <div style="font-size:1.7rem;font-weight:700;margin:14px 0 6px;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${ult?fmtCOP(ult.monto):'<span style="color:var(--muted);font-size:1rem;font-weight:500">Sin registros</span>'}</div>
-            <div style="color:var(--muted);font-size:.78rem;margin-bottom:14px">${ult?'Actualizado '+fmtDate(ult.fecha):'—'} · ${nregs} registro(s)</div>
+            <div style="font-size:1.7rem;font-weight:700;margin:14px 0 4px;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${ult?fmtCOP(ult.monto):'<span style="color:var(--muted);font-size:1rem;font-weight:500">Sin registros</span>'}</div>
+            <div style="color:var(--muted);font-size:.75rem;margin-bottom:12px">${ult?fmtDate(ult.fecha):'—'} · ${nregs} registro(s)</div>
+            ${bols.length?`<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:10px 12px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px">
+              ${bols.map(b=>`<div style="display:flex;justify-content:space-between;font-size:.82rem;gap:8px"><span style="color:rgba(255,255,255,.7);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.n}</span><span class="amount" style="color:#fff">${fmtCOP(b.m)}</span></div>`).join('')}
+            </div>`:''}
             <button class="btn btn-success btn-sm" style="width:100%;margin-top:auto" onclick="formSaldoFor('${c.id}')">＋ Actualizar saldo</button>
           </div>`;
         }).join('')}
@@ -508,24 +512,68 @@ function delCuenta(id){
 function formSaldo(preselectId){
   if(!S.cuentas.length)return toast('Crea primero una cuenta','error');
   const sel=preselectId||S.cuentas[0].id;
-  const c=S.cuentas.find(x=>x.id===sel);
-  const ult=S.saldos.filter(s=>s.cuentaId===sel).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
-  openModal(`<h2>${preselectId?'Actualizar saldo':'Registrar saldo'}</h2>
-    ${preselectId&&ult?`<div style="background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.2);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:.85rem"><span style="color:var(--muted)">Último registro:</span> <b>${fmtCOP(ult.monto)}</b> <span style="color:var(--muted)">el ${fmtDate(ult.fecha)}</span></div>`:''}
-    <div class="form-grid" style="grid-template-columns:1fr;gap:14px">
-      <div class="field"><label>Cuenta</label><select class="icone-select" id="f-cuenta">${S.cuentas.map(c=>`<option value="${c.id}" ${c.id===sel?'selected':''}>${c.alias||c.banco}</option>`).join('')}</select></div>
-      <div class="field"><label>Fecha del corte</label><input type="date" class="icone-input" id="f-fecha" value="${today()}"></div>
-      <div class="field"><label>Saldo nuevo (COP)</label><input type="number" step="any" class="icone-input icone-input-lg" id="f-monto" placeholder="${ult?ult.monto:'0'}" autofocus></div>
-      <div class="field"><label>Nota (opcional)</label><input class="icone-input" id="f-nota" placeholder="Corte mensual, etc."></div>
-    </div>
-    <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="saveSaldo()">Guardar saldo</button></div>`);
+  renderSaldoForm(sel);
 }
 function formSaldoFor(id){formSaldo(id)}
+
+function renderSaldoForm(cuentaId){
+  const c=S.cuentas.find(x=>x.id===cuentaId);
+  const ult=S.saldos.filter(s=>s.cuentaId===cuentaId).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+  // Bolsillos a editar: si hay último registro, copiar su lista; sino, un bolsillo "Principal" vacío
+  const bolsillosTemplate=(ult&&ult.bolsillos&&ult.bolsillos.length)?ult.bolsillos.map(b=>({n:b.n,m:b.m})):[{n:"Principal",m:0}];
+  openModal(`<h2>Actualizar saldo · <span style="color:${c.color}">${c.alias||c.banco}</span></h2>
+    ${ult?`<div style="background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.2);border-radius:12px;padding:10px 14px;margin-bottom:16px;font-size:.84rem"><span style="color:var(--muted)">Último corte:</span> <b>${fmtCOP(ult.monto)}</b> <span style="color:var(--muted)">· ${fmtDate(ult.fecha)}</span></div>`:''}
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">
+      <div class="field"><label>Cuenta</label><select class="icone-select" id="f-cuenta" onchange="renderSaldoForm(this.value)">${S.cuentas.map(x=>`<option value="${x.id}" ${x.id===cuentaId?'selected':''}>${x.alias||x.banco}</option>`).join('')}</select></div>
+      <div class="field"><label>Fecha del corte</label><input type="date" class="icone-input" id="f-fecha" value="${today()}"></div>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <label style="font-size:.78rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Bolsillos / Conceptos</label>
+      <div style="font-size:.82rem;color:var(--muted)">Total: <span id="f-total" style="color:var(--cyan);font-weight:700;font-size:1.05rem;font-variant-numeric:tabular-nums">$0</span></div>
+    </div>
+    <div id="f-bolsillos" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px"></div>
+    <button class="btn btn-outline btn-sm" onclick="addBolsilloRow()" style="margin-bottom:18px">＋ Agregar bolsillo</button>
+
+    <div class="field" style="margin-bottom:18px"><label>Nota (opcional)</label><input class="icone-input" id="f-nota" placeholder="Corte mensual, etc."></div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="saveSaldo()">Guardar saldo</button></div>`);
+
+  // pintar bolsillos
+  bolsillosTemplate.forEach(b=>addBolsilloRow(b.n,b.m));
+  updateBolsilloTotal();
+}
+
+function addBolsilloRow(nombre='',monto=''){
+  const wrap=document.getElementById('f-bolsillos');if(!wrap)return;
+  const row=document.createElement('div');
+  row.className='bolsillo-row';
+  row.style.cssText='display:grid;grid-template-columns:1fr 130px 38px;gap:8px;align-items:center';
+  row.innerHTML=`<input class="icone-input" placeholder="Nombre del bolsillo" value="${nombre}" style="padding:11px 14px">
+    <input type="number" step="any" class="icone-input bolsillo-monto" placeholder="0" value="${monto||''}" oninput="updateBolsilloTotal()" style="padding:11px 14px;text-align:right;font-variant-numeric:tabular-nums">
+    <button class="btn btn-icon btn-sm btn-ghost" onclick="this.parentElement.remove();updateBolsilloTotal()" title="Eliminar">✕</button>`;
+  wrap.appendChild(row);
+  // focus al nuevo si está vacío
+  if(!nombre)row.querySelector('input').focus();
+}
+
+function updateBolsilloTotal(){
+  const inputs=document.querySelectorAll('#f-bolsillos .bolsillo-monto');
+  let t=0;inputs.forEach(i=>{t+=parseFloat(i.value)||0});
+  const out=document.getElementById('f-total');if(out)out.textContent=fmtCOP(t);
+}
 function saveSaldo(){
-  const monto=parseFloat(document.getElementById('f-monto').value);
-  if(isNaN(monto))return toast('Monto inválido','error');
-  S.saldos.push({id:uid(),cuentaId:document.getElementById('f-cuenta').value,fecha:document.getElementById('f-fecha').value,monto,nota:document.getElementById('f-nota').value.trim()});
-  saveState();closeModal();rerender();toast('Saldo registrado');
+  const rows=document.querySelectorAll('#f-bolsillos .bolsillo-row');
+  const bolsillos=[];let total=0;
+  rows.forEach(r=>{
+    const n=r.querySelector('input').value.trim();
+    const m=parseFloat(r.querySelector('.bolsillo-monto').value)||0;
+    if(n)bolsillos.push({n,m});
+    total+=m;
+  });
+  if(!bolsillos.length)return toast('Agrega al menos un bolsillo','error');
+  S.saldos.push({id:uid(),cuentaId:document.getElementById('f-cuenta').value,fecha:document.getElementById('f-fecha').value,monto:total,bolsillos,nota:document.getElementById('f-nota').value.trim()});
+  saveState();closeModal();rerender();toast('✓ Saldo registrado: '+fmtCOP(total));
 }
 function delSaldo(id){if(!confirm('¿Eliminar este registro?'))return;S.saldos=S.saldos.filter(x=>x.id!==id);saveState();rerender();toast('Eliminado')}
 
@@ -904,7 +952,17 @@ function initParticles(){
    INICIALIZACIÓN
    =================================================== */
 /* Datos iniciales embebidos — se cargan automáticamente la primera vez */
-const SEED={cuentas:[{id:"c_banco806",banco:"Bancolombia 806",alias:"Bancolombia 806",tipo:"Ahorros",color:"#FFD600"},{id:"c_banco4321",banco:"Bancolombia 4321",alias:"Bancolombia 4321",tipo:"Ahorros",color:"#FFB300"},{id:"c_daviplata",banco:"Daviplata",alias:"Daviplata",tipo:"Billetera digital",color:"#ED1C24"},{id:"c_nequi",banco:"Nequi",alias:"Nequi",tipo:"Billetera digital",color:"#FF3D00"},{id:"c_dolarapp",banco:"DolarApp",alias:"DolarApp",tipo:"Billetera digital",color:"#00d4ff"},{id:"c_dale",banco:"Dale",alias:"Dale",tipo:"Billetera digital",color:"#7b2fff"},{id:"c_nu",banco:"Nu",alias:"Nu",tipo:"Ahorros",color:"#820AD1"},{id:"c_lulo",banco:"Lulo",alias:"Lulo Bank",tipo:"Ahorros",color:"#00d48a"},{id:"c_claropay",banco:"Claro Pay",alias:"Claro Pay",tipo:"Billetera digital",color:"#ff8c00"}],saldos:[{id:"s_b806",cuentaId:"c_banco806",fecha:"2026-05-12",monto:445579,nota:"Principal $83.579 + Fondo Emergencias $144.000 + Generación de Riqueza $218.000"},{id:"s_b4321",cuentaId:"c_banco4321",fecha:"2026-05-12",monto:4137,nota:"Principal $140 + ICONE Academy $3.997"},{id:"s_davi",cuentaId:"c_daviplata",fecha:"2026-05-12",monto:12265,nota:"Principal $4.739 + Viajes $5.526 + Bendiciones Poli $2.000"},{id:"s_nequi",cuentaId:"c_nequi",fecha:"2026-05-12",monto:1291726,nota:"Principal $386.726 + Activos Pasivos $405.000 + Bendiciones Poli $500.000"},{id:"s_dolar",cuentaId:"c_dolarapp",fecha:"2026-05-12",monto:0,nota:"Saldo Principal"},{id:"s_dale",cuentaId:"c_dale",fecha:"2026-05-12",monto:1073523,nota:"Principal $191.298 + Bendiciones Poli $882.225"},{id:"s_nu",cuentaId:"c_nu",fecha:"2026-05-12",monto:241882,nota:"Principal $4.119 + Mi primera Cajita $1.005 + Acumulación Riqueza $705 + Bendiciones Poli $235.854 + Provisión Pagos $199"},{id:"s_lulo",cuentaId:"c_lulo",fecha:"2026-05-12",monto:690499,nota:"Principal $24.148 + Ahorros $81.800 + Fondo de imprevistos $406.299 + Bendiciones Poli $897 + Dólares $177.355"},{id:"s_claro",cuentaId:"c_claropay",fecha:"2026-05-12",monto:773,nota:"Saldo Principal"}],ingresos:[],egresos:[]};
+const SEED={cuentas:[{id:"c_banco806",banco:"Bancolombia 806",alias:"Bancolombia 806",tipo:"Ahorros",color:"#FFD600"},{id:"c_banco4321",banco:"Bancolombia 4321",alias:"Bancolombia 4321",tipo:"Ahorros",color:"#FFB300"},{id:"c_daviplata",banco:"Daviplata",alias:"Daviplata",tipo:"Billetera digital",color:"#ED1C24"},{id:"c_nequi",banco:"Nequi",alias:"Nequi",tipo:"Billetera digital",color:"#FF3D00"},{id:"c_dolarapp",banco:"DolarApp",alias:"DolarApp",tipo:"Billetera digital",color:"#00d4ff"},{id:"c_dale",banco:"Dale",alias:"Dale",tipo:"Billetera digital",color:"#7b2fff"},{id:"c_nu",banco:"Nu",alias:"Nu",tipo:"Ahorros",color:"#820AD1"},{id:"c_lulo",banco:"Lulo",alias:"Lulo Bank",tipo:"Ahorros",color:"#00d48a"},{id:"c_claropay",banco:"Claro Pay",alias:"Claro Pay",tipo:"Billetera digital",color:"#ff8c00"}],saldos:[
+{id:"s_b806",cuentaId:"c_banco806",fecha:"2026-05-12",monto:445579,bolsillos:[{n:"Principal",m:83579},{n:"Dinero en Tránsito",m:0},{n:"Fondo Emergencias",m:144000},{n:"Generación de Riqueza",m:218000},{n:"Compartir",m:0},{n:"Arriendo",m:0}],nota:""},
+{id:"s_b4321",cuentaId:"c_banco4321",fecha:"2026-05-12",monto:4137,bolsillos:[{n:"Principal",m:140},{n:"ICONE Academy",m:3997},{n:"Transferencias O.B.",m:0}],nota:""},
+{id:"s_davi",cuentaId:"c_daviplata",fecha:"2026-05-12",monto:12265,bolsillos:[{n:"Principal",m:4739},{n:"Comprometido",m:0},{n:"Viajes",m:5526},{n:"Bendiciones Poli",m:2000}],nota:""},
+{id:"s_nequi",cuentaId:"c_nequi",fecha:"2026-05-12",monto:1291726,bolsillos:[{n:"Principal",m:386726},{n:"Activos Pasivos",m:405000},{n:"Bendiciones Poli",m:500000},{n:"Ahorro",m:0}],nota:""},
+{id:"s_dolar",cuentaId:"c_dolarapp",fecha:"2026-05-12",monto:0,bolsillos:[{n:"Principal",m:0}],nota:""},
+{id:"s_dale",cuentaId:"c_dale",fecha:"2026-05-12",monto:1073523,bolsillos:[{n:"Principal",m:191298},{n:"Bendiciones Poli",m:882225},{n:"Compartir",m:0}],nota:""},
+{id:"s_nu",cuentaId:"c_nu",fecha:"2026-05-12",monto:241882,bolsillos:[{n:"Principal",m:4119},{n:"Mi primera Cajita",m:1005},{n:"Acumulación Riqueza",m:705},{n:"Bendiciones Poli",m:235854},{n:"Provisión Pagos",m:199}],nota:""},
+{id:"s_lulo",cuentaId:"c_lulo",fecha:"2026-05-12",monto:690499,bolsillos:[{n:"Principal",m:24148},{n:"Ahorros",m:81800},{n:"Fondo de imprevistos",m:406299},{n:"Bendiciones Poli",m:897},{n:"Dólares",m:177355}],nota:""},
+{id:"s_claro",cuentaId:"c_claropay",fecha:"2026-05-12",monto:773,bolsillos:[{n:"Principal",m:773}],nota:""}
+],ingresos:[],egresos:[]};
 const SEED_MODULES=[{id:"cm_bendiciones",label:"Bendiciones Poli",icon:"🙏",type:"meta",objetivo:5200000,items:[{id:"bp1",fecha:"2026-05-12",monto:2000,concepto:"Daviplata",nota:""},{id:"bp2",fecha:"2026-05-12",monto:500000,concepto:"Nequi",nota:""},{id:"bp3",fecha:"2026-05-12",monto:882225,concepto:"Dale",nota:""},{id:"bp4",fecha:"2026-05-12",monto:235854,concepto:"Nu",nota:""},{id:"bp5",fecha:"2026-05-12",monto:897,concepto:"Lulo",nota:""}]},{id:"cm_fondoemergencias",label:"Fondo Emergencias",icon:"🚨",type:"meta",objetivo:1440389,items:[{id:"fe1",fecha:"2026-05-12",monto:144000,concepto:"Bancolombia 806",nota:""},{id:"fe2",fecha:"2026-05-12",monto:406299,concepto:"Lulo — Fondo imprevistos",nota:""}]},{id:"cm_generacionriqueza",label:"Generación de Riqueza",icon:"📈",type:"meta",objetivo:1000000,items:[{id:"gr1",fecha:"2026-05-12",monto:218000,concepto:"Bancolombia 806",nota:""},{id:"gr2",fecha:"2026-05-12",monto:705,concepto:"Nu — Acumulación",nota:""}]}];
 
 function autoSeed(){
