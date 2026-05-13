@@ -843,11 +843,24 @@ function initParticles(){
 /* ===================================================
    INICIALIZACIÓN
    =================================================== */
+/* [Los datos iniciales se retiraron de todo el historial el 2 de septiembre
+   de 2026: eran saldos bancarios reales en un repositorio público.] */
+
+function autoSeed(){
+  if(localStorage.getItem(STORE_KEY))return false; // ya tiene datos
+  Object.assign(S,SEED);
+  modulesCustom=SEED_MODULES;
+  saveState();
+  return true;
+}
+
 (async function init(){
+  const seeded=autoSeed();
   loadState();
   await openDB();
   initParticles();
   rerender();
+  if(seeded)setTimeout(()=>toast('✓ Saldos iniciales cargados ($3.760.384)'),600);
 })();
 </script>
 </body>
