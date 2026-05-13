@@ -43,21 +43,75 @@ body::before{content:"";position:fixed;inset:0;background:radial-gradient(ellips
 .page-title .gradient{background:linear-gradient(135deg,var(--cyan),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .page-sub{color:var(--muted);font-size:.9rem;margin-top:2px}
 
-/* Componentes — Estilo Apple/Tesla: tactil, premium, suave */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 22px;border-radius:14px;font-weight:600;cursor:pointer;border:none;font-size:.92rem;transition:transform .15s cubic-bezier(.2,.8,.3,1.2),box-shadow .2s,background .2s,border-color .2s,color .2s;font-family:inherit;letter-spacing:-.01em;line-height:1;user-select:none;-webkit-tap-highlight-color:transparent;position:relative;overflow:hidden}
-.btn:active{transform:scale(.96)}
-.btn::after{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(180deg,rgba(255,255,255,.15),transparent 45%);pointer-events:none;opacity:.7}
-.btn-primary{background:linear-gradient(180deg,#22e2ff,#00b8e6 45%,#7b2fff);color:#fff;box-shadow:0 8px 24px -8px rgba(0,212,255,.55),0 2px 6px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.25)}
-.btn-primary:hover{transform:translateY(-1px);box-shadow:0 12px 28px -8px rgba(0,212,255,.7),0 4px 10px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.3)}
-.btn-outline{background:rgba(255,255,255,.05);border:1px solid rgba(0,212,255,.35);color:var(--cyan);backdrop-filter:blur(10px)}
-.btn-outline:hover{background:rgba(0,212,255,.12);border-color:var(--cyan)}
-.btn-ghost{background:rgba(255,255,255,.07);color:#fff;backdrop-filter:blur(10px)}
-.btn-ghost:hover{background:rgba(255,255,255,.13)}
-.btn-danger{background:rgba(255,71,87,.14);color:var(--red);border:1px solid rgba(255,71,87,.35);backdrop-filter:blur(10px)}
-.btn-danger:hover{background:rgba(255,71,87,.22);border-color:rgba(255,71,87,.6)}
-.btn-sm{padding:9px 16px;font-size:.82rem;border-radius:11px}
-.btn-icon{padding:9px;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.06)}
-.btn-icon:hover{background:rgba(255,255,255,.14)}
+/* ═══ BOTONES APPLE / TESLA ═══════════════════════════
+   Pill perfectos, glass, tactiles, feedback premium */
+.btn{
+  --bg:rgba(255,255,255,.08); --fg:#fff; --bd:rgba(255,255,255,.12);
+  display:inline-flex;align-items:center;justify-content:center;gap:10px;
+  padding:14px 24px;border-radius:999px;font-weight:600;font-size:.94rem;
+  letter-spacing:-.015em;line-height:1;cursor:pointer;border:1px solid var(--bd);
+  background:var(--bg);color:var(--fg);position:relative;overflow:hidden;
+  font-family:inherit;user-select:none;-webkit-tap-highlight-color:transparent;
+  transition:transform .25s cubic-bezier(.2,.9,.3,1.2),box-shadow .3s,background .25s,border-color .25s,filter .2s;
+  backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.1),inset 0 -1px 0 rgba(0,0,0,.2),0 4px 16px -8px rgba(0,0,0,.5);
+  white-space:nowrap;
+}
+.btn::before{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(180deg,rgba(255,255,255,.18) 0%,transparent 50%);opacity:.8;pointer-events:none;transition:opacity .25s}
+.btn::after{content:"";position:absolute;inset:0;border-radius:inherit;background:radial-gradient(circle at var(--mx,50%) var(--my,50%),rgba(255,255,255,.25),transparent 60%);opacity:0;transition:opacity .35s;pointer-events:none}
+.btn:hover{transform:translateY(-1px);filter:brightness(1.08)}
+.btn:hover::after{opacity:1}
+.btn:active{transform:scale(.96);transition:transform .08s}
+.btn:active::before{opacity:1}
+
+/* Primario: degradé cyan→púrpura, sombra de profundidad */
+.btn-primary{
+  --bg:linear-gradient(135deg,#00d4ff 0%,#1d8aff 50%,#7b2fff 100%);
+  --fg:#fff; --bd:rgba(255,255,255,.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.35),
+    inset 0 -2px 4px rgba(0,0,0,.25),
+    0 6px 20px -6px rgba(0,212,255,.55),
+    0 12px 32px -10px rgba(123,47,255,.4),
+    0 2px 6px rgba(0,0,0,.3);
+  text-shadow:0 1px 1px rgba(0,0,0,.15);
+}
+.btn-primary:hover{box-shadow:inset 0 1px 0 rgba(255,255,255,.4),inset 0 -2px 4px rgba(0,0,0,.25),0 10px 28px -6px rgba(0,212,255,.7),0 18px 40px -10px rgba(123,47,255,.5),0 2px 6px rgba(0,0,0,.3)}
+
+/* Outline: vidrio claro con borde brillante */
+.btn-outline{
+  --bg:rgba(0,212,255,.08); --fg:#00d4ff; --bd:rgba(0,212,255,.45);
+  box-shadow:inset 0 1px 0 rgba(0,212,255,.15),0 4px 16px -8px rgba(0,212,255,.3);
+}
+.btn-outline:hover{--bg:rgba(0,212,255,.16);--bd:rgba(0,212,255,.7)}
+
+/* Ghost: glass neutro */
+.btn-ghost{--bg:rgba(255,255,255,.07);--bd:rgba(255,255,255,.1)}
+.btn-ghost:hover{--bg:rgba(255,255,255,.14);--bd:rgba(255,255,255,.18)}
+
+/* Danger: rojo glass */
+.btn-danger{--bg:rgba(255,71,87,.14);--fg:#ff6b78;--bd:rgba(255,71,87,.4);box-shadow:inset 0 1px 0 rgba(255,107,120,.2),0 4px 16px -8px rgba(255,71,87,.4)}
+.btn-danger:hover{--bg:rgba(255,71,87,.24);--bd:rgba(255,71,87,.7)}
+
+/* Verde acción (actualizar) */
+.btn-success{
+  --bg:linear-gradient(135deg,#00e09a 0%,#00b8e6 100%);
+  --fg:#001a14; --bd:rgba(255,255,255,.25);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 6px 20px -6px rgba(0,212,138,.55),0 2px 6px rgba(0,0,0,.3);
+  font-weight:700;
+}
+.btn-success:hover{box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 10px 28px -6px rgba(0,212,138,.75),0 2px 6px rgba(0,0,0,.3)}
+
+/* Tamaños */
+.btn-sm{padding:9px 16px;font-size:.83rem}
+.btn-lg{padding:17px 30px;font-size:1rem}
+
+/* Icon button — circular Tesla-style */
+.btn-icon{padding:0;width:40px;height:40px;border-radius:50%;justify-content:center}
+.btn-icon.btn-sm{width:34px;height:34px;font-size:.9rem}
+
+/* Tracking del cursor para shine effect */
+.btn{--mx:50%;--my:50%}
 
 .card{background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08);border-radius:20px;padding:24px;backdrop-filter:blur(20px);box-shadow:0 1px 0 rgba(255,255,255,.05) inset,0 20px 40px -20px rgba(0,0,0,.4)}
 .card h3{font-size:1rem;margin-bottom:14px;font-weight:700;display:flex;align-items:center;gap:8px}
@@ -407,13 +461,14 @@ registerModule({
         ${S.cuentas.map(c=>{
           const ult=S.saldos.filter(s=>s.cuentaId===c.id).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
           const nregs=S.saldos.filter(s=>s.cuentaId===c.id).length;
-          return `<div class="card" style="border-left:4px solid ${c.color||'#00d4ff'}">
+          return `<div class="card" style="border-left:4px solid ${c.color||'#00d4ff'};display:flex;flex-direction:column">
             <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
-              <div><div style="font-weight:700">${c.alias||c.banco}</div><div style="color:var(--muted);font-size:.78rem">${c.banco} · ${c.tipo}</div></div>
-              <div><button class="btn btn-ghost btn-sm" onclick="formCuenta('${c.id}')">✎</button><button class="btn btn-ghost btn-sm" onclick="delCuenta('${c.id}')">🗑</button></div>
+              <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:1.05rem">${c.alias||c.banco}</div><div style="color:var(--muted);font-size:.78rem">${c.tipo}</div></div>
+              <div style="display:flex;gap:6px"><button class="btn btn-icon btn-sm btn-ghost" onclick="formCuenta('${c.id}')" title="Editar">✎</button><button class="btn btn-icon btn-sm btn-ghost" onclick="delCuenta('${c.id}')" title="Eliminar">🗑</button></div>
             </div>
-            <div style="font-size:1.5rem;font-weight:800;margin:10px 0">${ult?fmtCOP(ult.monto):'<span style="color:var(--muted);font-size:1rem">Sin registros</span>'}</div>
-            <div style="color:var(--muted);font-size:.78rem">${ult?'Actualizado '+fmtDate(ult.fecha):'—'} · ${nregs} registro(s)</div>
+            <div style="font-size:1.7rem;font-weight:700;margin:14px 0 6px;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${ult?fmtCOP(ult.monto):'<span style="color:var(--muted);font-size:1rem;font-weight:500">Sin registros</span>'}</div>
+            <div style="color:var(--muted);font-size:.78rem;margin-bottom:14px">${ult?'Actualizado '+fmtDate(ult.fecha):'—'} · ${nregs} registro(s)</div>
+            <button class="btn btn-success btn-sm" style="width:100%;margin-top:auto" onclick="formSaldoFor('${c.id}')">＋ Actualizar saldo</button>
           </div>`;
         }).join('')}
       </div>
@@ -450,17 +505,22 @@ function delCuenta(id){
   S.saldos=S.saldos.filter(x=>x.cuentaId!==id);
   saveState();rerender();toast('Cuenta eliminada');
 }
-function formSaldo(){
+function formSaldo(preselectId){
   if(!S.cuentas.length)return toast('Crea primero una cuenta','error');
-  openModal(`<h2>Registrar saldo</h2>
-    <div class="form-grid" style="grid-template-columns:1fr;gap:12px">
-      <div class="field"><label>Cuenta</label><select class="icone-select" id="f-cuenta">${S.cuentas.map(c=>`<option value="${c.id}">${c.alias||c.banco}</option>`).join('')}</select></div>
-      <div class="field"><label>Fecha</label><input type="date" class="icone-input" id="f-fecha" value="${today()}"></div>
-      <div class="field"><label>Saldo (COP)</label><input type="number" step="any" class="icone-input" id="f-monto" placeholder="0"></div>
+  const sel=preselectId||S.cuentas[0].id;
+  const c=S.cuentas.find(x=>x.id===sel);
+  const ult=S.saldos.filter(s=>s.cuentaId===sel).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+  openModal(`<h2>${preselectId?'Actualizar saldo':'Registrar saldo'}</h2>
+    ${preselectId&&ult?`<div style="background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.2);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:.85rem"><span style="color:var(--muted)">Último registro:</span> <b>${fmtCOP(ult.monto)}</b> <span style="color:var(--muted)">el ${fmtDate(ult.fecha)}</span></div>`:''}
+    <div class="form-grid" style="grid-template-columns:1fr;gap:14px">
+      <div class="field"><label>Cuenta</label><select class="icone-select" id="f-cuenta">${S.cuentas.map(c=>`<option value="${c.id}" ${c.id===sel?'selected':''}>${c.alias||c.banco}</option>`).join('')}</select></div>
+      <div class="field"><label>Fecha del corte</label><input type="date" class="icone-input" id="f-fecha" value="${today()}"></div>
+      <div class="field"><label>Saldo nuevo (COP)</label><input type="number" step="any" class="icone-input icone-input-lg" id="f-monto" placeholder="${ult?ult.monto:'0'}" autofocus></div>
       <div class="field"><label>Nota (opcional)</label><input class="icone-input" id="f-nota" placeholder="Corte mensual, etc."></div>
     </div>
-    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="saveSaldo()">Guardar</button></div>`);
+    <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-success" onclick="saveSaldo()">Guardar saldo</button></div>`);
 }
+function formSaldoFor(id){formSaldo(id)}
 function saveSaldo(){
   const monto=parseFloat(document.getElementById('f-monto').value);
   if(isNaN(monto))return toast('Monto inválido','error');
@@ -854,6 +914,14 @@ function autoSeed(){
   saveState();
   return true;
 }
+
+/* Tracking del cursor para efecto shine en botones (Tesla-style) */
+document.addEventListener('mousemove',e=>{
+  const btn=e.target.closest('.btn');if(!btn)return;
+  const r=btn.getBoundingClientRect();
+  btn.style.setProperty('--mx',(e.clientX-r.left)+'px');
+  btn.style.setProperty('--my',(e.clientY-r.top)+'px');
+});
 
 (async function init(){
   const seeded=autoSeed();
