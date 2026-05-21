@@ -388,12 +388,23 @@ function pctDelta(now,prev,inverse=false){
   return `<span class="${positive?'up':'down'}">${d>=0?'▲':'▼'} ${Math.abs(d).toFixed(1)}% vs mes anterior</span>`;
 }
 function getPrevMonth(ym){const[y,m]=ym.split('-').map(Number);const d=new Date(y,m-2,1);return d.toISOString().slice(0,7)}
+
+/* Devuelve el saldo MÁS RECIENTE de una cuenta.
+   Si hay varios con la misma fecha, gana el último insertado (índice mayor). */
+function getUltimoSaldo(cuentaId,maxFecha){
+  let best=null,bestIdx=-1;
+  for(let i=0;i<S.saldos.length;i++){
+    const s=S.saldos[i];
+    if(s.cuentaId!==cuentaId)continue;
+    if(maxFecha&&s.fecha>maxFecha)continue;
+    if(!best||s.fecha>best.fecha||(s.fecha===best.fecha&&i>bestIdx)){
+      best=s;bestIdx=i;
+    }
+  }
+  return best;
+}
 function getSaldoConsolidado(){
-  // último saldo registrado por cuenta
-  return S.cuentas.reduce((acc,c)=>{
-    const ult=S.saldos.filter(s=>s.cuentaId===c.id).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
-    return acc+(ult?ult.monto:0);
-  },0);
+  return S.cuentas.reduce((acc,c)=>{const u=getUltimoSaldo(c.id);return acc+(u?u.monto:0)},0);
 }
 
 let charts={};
@@ -408,10 +419,7 @@ function renderDashboardCharts(){
   if(ctx1){
     const allDates=[...new Set(S.saldos.map(s=>s.fecha))].sort();
     const datasets=S.cuentas.map((c,i)=>{
-      const series=allDates.map(f=>{
-        const reg=S.saldos.filter(s=>s.cuentaId===c.id&&s.fecha<=f).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
-        return reg?reg.monto:null;
-      });
+      const series=allDates.map(f=>{const reg=getUltimoSaldo(c.id,f);return reg?reg.monto:null});
       return {label:c.alias||c.banco,data:series,borderColor:c.color||chartColors[i%chartColors.length],backgroundColor:(c.color||chartColors[i%chartColors.length])+'33',tension:.3,fill:false,spanGaps:true};
     });
     charts.saldos=new Chart(ctx1,{type:'line',data:{labels:allDates.map(d=>fmtDate(d)),datasets},options:chartBase});
@@ -459,7 +467,7 @@ registerModule({
     return `
       <div class="grid-3" style="margin-bottom:18px">
         ${S.cuentas.map(c=>{
-          const ult=S.saldos.filter(s=>s.cuentaId===c.id).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+          const ult=getUltimoSaldo(c.id);
           const nregs=S.saldos.filter(s=>s.cuentaId===c.id).length;
           const bols=ult&&ult.bolsillos?ult.bolsillos.filter(b=>b.m>0):[];
           return `<div class="card" style="border-left:4px solid ${c.color||'#00d4ff'};display:flex;flex-direction:column">
@@ -476,9 +484,9 @@ registerModule({
           </div>`;
         }).join('')}
       </div>
-      <div class="card"><h3>📋 Historial de saldos</h3>
-        ${S.saldos.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Cuenta</th><th style="text-align:right">Saldo</th><th>Nota</th><th></th></tr></thead><tbody>
-          ${[...S.saldos].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(s=>{const c=S.cuentas.find(x=>x.id===s.cuentaId);return `<tr><td>${fmtDate(s.fecha)}</td><td><span class="dot" style="background:${c?.color||'#00d4ff'}"></span>${c?.alias||c?.banco||'—'}</td><td style="text-align:right" class="amount">${fmtCOP(s.monto)}</td><td style="color:var(--muted);font-size:.85rem">${s.nota||'—'}</td><td><button class="btn btn-ghost btn-sm" onclick="delSaldo('${s.id}')">🗑</button></td></tr>`}).join('')}
+      <div class="card"><h3>📋 Historial de saldos · todas las versiones</h3>
+        ${S.saldos.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Cuenta</th><th>Bolsillos</th><th style="text-align:right">Saldo</th><th></th></tr></thead><tbody>
+          ${S.saldos.map((s,i)=>({s,i})).sort((a,b)=>{const c=b.s.fecha.localeCompare(a.s.fecha);return c||(b.i-a.i)}).map(({s})=>{const c=S.cuentas.find(x=>x.id===s.cuentaId);const bols=s.bolsillos||[];return `<tr><td>${fmtDate(s.fecha)}</td><td><span class="dot" style="background:${c?.color||'#00d4ff'}"></span>${c?.alias||c?.banco||'—'}</td><td style="font-size:.8rem;color:var(--muted)">${bols.length?bols.filter(b=>b.m>0).map(b=>`${b.n}: ${fmtCOP(b.m)}`).join(' · '):(s.nota||'—')}</td><td style="text-align:right" class="amount">${fmtCOP(s.monto)}</td><td><button class="btn btn-icon btn-sm btn-ghost" onclick="delSaldo('${s.id}')" title="Eliminar versión">🗑</button></td></tr>`}).join('')}
         </tbody></table></div>`:`<div class="empty"><div class="empty-icon">📋</div>Aún no has registrado saldos</div>`}
       </div>
     `;
@@ -518,7 +526,7 @@ function formSaldoFor(id){formSaldo(id)}
 
 function renderSaldoForm(cuentaId){
   const c=S.cuentas.find(x=>x.id===cuentaId);
-  const ult=S.saldos.filter(s=>s.cuentaId===cuentaId).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+  const ult=getUltimoSaldo(cuentaId);
   // Bolsillos a editar: si hay último registro, copiar su lista; sino, un bolsillo "Principal" vacío
   const bolsillosTemplate=(ult&&ult.bolsillos&&ult.bolsillos.length)?ult.bolsillos.map(b=>({n:b.n,m:b.m})):[{n:"Principal",m:0}];
   openModal(`<h2>Actualizar saldo · <span style="color:${c.color}">${c.alias||c.banco}</span></h2>
@@ -568,12 +576,11 @@ function saveSaldo(){
   rows.forEach(r=>{
     const n=r.querySelector('input').value.trim();
     const m=parseFloat(r.querySelector('.bolsillo-monto').value)||0;
-    if(n)bolsillos.push({n,m});
-    total+=m;
+    if(n){bolsillos.push({n,m});total+=m}
   });
   if(!bolsillos.length)return toast('Agrega al menos un bolsillo','error');
-  S.saldos.push({id:uid(),cuentaId:document.getElementById('f-cuenta').value,fecha:document.getElementById('f-fecha').value,monto:total,bolsillos,nota:document.getElementById('f-nota').value.trim()});
-  saveState();closeModal();rerender();toast('✓ Saldo registrado: '+fmtCOP(total));
+  S.saldos.push({id:uid(),cuentaId:document.getElementById('f-cuenta').value,fecha:document.getElementById('f-fecha').value,monto:total,bolsillos,nota:document.getElementById('f-nota').value.trim(),createdAt:new Date().toISOString()});
+  saveState();closeModal();rerender();toast('✓ Saldo guardado: '+fmtCOP(total));
 }
 function delSaldo(id){if(!confirm('¿Eliminar este registro?'))return;S.saldos=S.saldos.filter(x=>x.id!==id);saveState();rerender();toast('Eliminado')}
 
