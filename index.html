@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>ICONE Finanzas | Gestión Financiera Personal</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -189,10 +192,10 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
 .preview-strip .p img{width:100%;height:100%;object-fit:cover}
 .preview-strip .x{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.7);color:var(--red);border:none;width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:.7rem;line-height:1;display:grid;place-items:center}
 
-/* Toast */
-.toast{position:fixed;bottom:24px;right:24px;background:#0a1530;border:1px solid var(--cyan);border-left-width:4px;border-radius:10px;padding:14px 20px;z-index:2000;box-shadow:0 8px 30px rgba(0,0,0,.5);min-width:260px;transform:translateY(100px);opacity:0;transition:.3s}
-.toast.show{transform:translateY(0);opacity:1}
-.toast.error{border-color:var(--red)}
+/* Toast — más visible */
+.toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%) translateY(120px);background:linear-gradient(135deg,#0a1530,#0f1f3d);border:2px solid var(--green);border-radius:14px;padding:16px 26px;z-index:2000;box-shadow:0 16px 50px rgba(0,212,138,.4),0 4px 12px rgba(0,0,0,.5);min-width:280px;max-width:90vw;opacity:0;transition:.35s cubic-bezier(.2,.9,.3,1.2);font-weight:600;font-size:.98rem;text-align:center;backdrop-filter:blur(12px)}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.toast.error{border-color:var(--red);box-shadow:0 16px 50px rgba(255,71,87,.4),0 4px 12px rgba(0,0,0,.5)}
 .toast.success{border-color:var(--green)}
 
 /* Module hidden/visible */
@@ -237,6 +240,10 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     <div class="nav-section">Datos</div>
     <div class="nav-item" data-go="config"><span class="nav-icon">⚙️</span><span>Configuración</span></div>
     <div class="nav-item add-module" onclick="openAddModule()"><span>＋ Agregar módulo</span></div>
+    <div style="margin-top:20px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.6</b></div>
+      <div style="margin-top:2px">Build 2026-05-24</div>
+    </div>
   </aside>
 
   <!-- MAIN -->
@@ -327,7 +334,7 @@ function dbDel(id){return new Promise((res,rej)=>{const tx=DB.transaction('recib
 function toast(msg,type='success'){
   const t=document.getElementById('toast');
   t.textContent=msg;t.className='toast show '+type;
-  setTimeout(()=>t.classList.remove('show'),2500);
+  setTimeout(()=>t.classList.remove('show'),3800);
 }
 
 /* ---------- MODAL ---------- */
@@ -571,16 +578,31 @@ function updateBolsilloTotal(){
   const out=document.getElementById('f-total');if(out)out.textContent=fmtCOP(t);
 }
 function saveSaldo(){
-  const rows=document.querySelectorAll('#f-bolsillos .bolsillo-row');
-  const bolsillos=[];let total=0;
-  rows.forEach(r=>{
-    const n=r.querySelector('input').value.trim();
-    const m=parseFloat(r.querySelector('.bolsillo-monto').value)||0;
-    if(n){bolsillos.push({n,m});total+=m}
-  });
-  if(!bolsillos.length)return toast('Agrega al menos un bolsillo','error');
-  S.saldos.push({id:uid(),cuentaId:document.getElementById('f-cuenta').value,fecha:document.getElementById('f-fecha').value,monto:total,bolsillos,nota:document.getElementById('f-nota').value.trim(),createdAt:new Date().toISOString()});
-  saveState();closeModal();rerender();toast('✓ Saldo guardado: '+fmtCOP(total));
+  try{
+    const rows=document.querySelectorAll('#f-bolsillos .bolsillo-row');
+    const bolsillos=[];let total=0;
+    rows.forEach(r=>{
+      const n=r.querySelector('input').value.trim();
+      const m=parseFloat(r.querySelector('.bolsillo-monto').value)||0;
+      if(n){bolsillos.push({n,m});total+=m}
+    });
+    if(!bolsillos.length)return toast('Agrega al menos un bolsillo','error');
+    const cuentaId=document.getElementById('f-cuenta').value;
+    const fecha=document.getElementById('f-fecha').value;
+    const nuevo={id:uid(),cuentaId,fecha,monto:total,bolsillos,nota:document.getElementById('f-nota').value.trim(),createdAt:new Date().toISOString()};
+    S.saldos.push(nuevo);
+    saveState();
+    // Verificar que realmente se guardó en localStorage
+    const verif=JSON.parse(localStorage.getItem(STORE_KEY));
+    const saved=verif.saldos.find(s=>s.id===nuevo.id);
+    if(!saved){toast('⚠️ Error: no se pudo guardar en este dispositivo','error');return}
+    closeModal();rerender();
+    const cuenta=S.cuentas.find(c=>c.id===cuentaId);
+    toast('✓ '+(cuenta.alias||cuenta.banco)+': '+fmtCOP(total));
+  }catch(err){
+    console.error('Error guardando saldo:',err);
+    toast('❌ Error: '+err.message,'error');
+  }
 }
 function delSaldo(id){if(!confirm('¿Eliminar este registro?'))return;S.saldos=S.saldos.filter(x=>x.id!==id);saveState();rerender();toast('Eliminado')}
 
@@ -767,6 +789,11 @@ function renderConfig(){
   document.getElementById('page-sub').textContent='Categorías, respaldo y datos';
   document.getElementById('page-actions').innerHTML='';
   document.getElementById('view-container').innerHTML=`
+    <div class="card" style="margin-bottom:18px;border:2px solid rgba(0,212,255,.4);background:linear-gradient(135deg,rgba(0,212,255,.08),rgba(123,47,255,.06))">
+      <h3>🔄 ¿Algo no se guarda o se ve raro?</h3>
+      <p style="color:var(--muted);font-size:.9rem;margin-bottom:14px">Si la app no se actualiza después de guardar, es porque tienes datos viejos en caché. Este botón limpia TODO y vuelve a cargar los saldos iniciales frescos.</p>
+      <button class="btn btn-primary btn-lg" onclick="forceReset()" style="width:100%">🔄 Reiniciar app con datos limpios</button>
+    </div>
     <div class="grid-2">
       <div class="card"><h3>💾 Respaldo de datos</h3>
         <p style="color:var(--muted);font-size:.88rem;margin-bottom:14px">Exporta toda tu información (incluyendo fotos de recibos) a un archivo JSON. Puedes importarla en otro dispositivo.</p>
@@ -827,6 +854,13 @@ async function wipeAll(){
   localStorage.removeItem(STORE_KEY);localStorage.removeItem(STORE_KEY+'_modules');
   const all=await dbAll();for(const r of all)await dbDel(r.id);
   location.reload();
+}
+async function forceReset(){
+  if(!confirm('¿Reiniciar la app con los saldos iniciales? Esto borra tus cambios locales y carga el seed fresco.'))return;
+  localStorage.clear();
+  const all=await dbAll();for(const r of all)await dbDel(r.id);
+  // forzar bypass de caché agregando timestamp a la URL
+  location.href=location.pathname+'?v='+Date.now();
 }
 
 /* ===================================================
