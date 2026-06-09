@@ -8,6 +8,7 @@
 <meta http-equiv="Expires" content="0">
 <title>ICONE Finanzas | Gestión Financiera Personal</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{
   --navy:#050d1f; --navy2:#0a1a3a;
@@ -240,8 +241,17 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     <div class="nav-section">Datos</div>
     <div class="nav-item" data-go="config"><span class="nav-icon">⚙️</span><span>Configuración</span></div>
     <div class="nav-item add-module" onclick="openAddModule()"><span>＋ Agregar módulo</span></div>
-    <div style="margin-top:20px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.6</b></div>
+
+    <div id="sync-indicator" onclick="go('config')" style="margin-top:16px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);cursor:pointer;display:flex;align-items:center;gap:10px;font-size:.82rem;transition:.2s">
+      <span id="sync-dot" style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.3)"></span>
+      <div style="flex:1;min-width:0">
+        <div id="sync-label" style="font-weight:600">Modo local</div>
+        <div id="sync-sub" style="font-size:.7rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Sin sincronizar</div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.7</b></div>
       <div style="margin-top:2px">Build 2026-05-24</div>
     </div>
   </aside>
@@ -313,6 +323,109 @@ function loadState(){
 function saveState(){
   localStorage.setItem(STORE_KEY,JSON.stringify(S));
   localStorage.setItem(STORE_KEY+'_modules',JSON.stringify(modulesCustom));
+  scheduleCloudSync();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SINCRONIZACIÓN CON SUPABASE (multi-dispositivo)
+   ═══════════════════════════════════════════════════════════ */
+const SUPABASE_URL='https://nvgkhdrrxqdgxktfkioa.supabase.co';
+const SUPABASE_ANON_KEY='sb_publishable_d1RrtE7S-9a8e8mGKRRjxQ_4HU_nkDl';
+let sb=null,currentUser=null,syncTimer=null,isPulling=false;
+
+function setSyncStatus(status,sub){
+  const dot=document.getElementById('sync-dot');
+  const label=document.getElementById('sync-label');
+  const subEl=document.getElementById('sync-sub');
+  if(!dot)return;
+  const map={
+    local:{c:'rgba(255,255,255,.35)',l:'Modo local',s:sub||'Sin sincronizar'},
+    syncing:{c:'#ffd93d',l:'Sincronizando...',s:sub||'Subiendo cambios'},
+    synced:{c:'#00d48a',l:'Sincronizado ✓',s:sub||currentUser?.email||''},
+    pulling:{c:'#00d4ff',l:'Bajando datos',s:sub||'Desde la nube'},
+    error:{c:'#ff4757',l:'Error de sync',s:sub||'Toca para reintentar'},
+    offline:{c:'#ff8c00',l:'Sin conexión',s:sub||'Cambios guardados local'}
+  };
+  const m=map[status]||map.local;
+  dot.style.background=m.c;dot.style.boxShadow=`0 0 10px ${m.c}`;
+  label.textContent=m.l;subEl.textContent=m.s;
+}
+
+async function initSupabase(){
+  if(!window.supabase){setSyncStatus('local','SDK no cargó');return}
+  sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+  sb.auth.onAuthStateChange((event,session)=>{
+    currentUser=session?.user||null;
+    if(event==='SIGNED_IN'){pullFromCloud()}
+    if(event==='SIGNED_OUT'){setSyncStatus('local')}
+  });
+  const {data}=await sb.auth.getSession();
+  currentUser=data.session?.user||null;
+  if(currentUser){await pullFromCloud()}else{setSyncStatus('local')}
+}
+
+async function pullFromCloud(){
+  if(!currentUser||!sb)return;
+  setSyncStatus('pulling');
+  isPulling=true;
+  try{
+    const {data,error}=await sb.from('finanzas_data').select('*').eq('user_id',currentUser.id).maybeSingle();
+    if(error)throw error;
+    if(data&&data.data&&Object.keys(data.data).length){
+      // Hay datos en la nube — la nube manda
+      S={...S,...data.data};
+      modulesCustom=data.modules||[];
+      localStorage.setItem(STORE_KEY,JSON.stringify(S));
+      localStorage.setItem(STORE_KEY+'_modules',JSON.stringify(modulesCustom));
+      rerender();
+      setSyncStatus('synced','Actualizado '+new Date(data.updated_at).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}));
+      toast('☁️ Datos descargados de la nube');
+    }else{
+      // Primera vez con este usuario — subimos lo local
+      await pushToCloud();
+    }
+  }catch(err){
+    console.error('Pull error:',err);
+    setSyncStatus('error',err.message);
+  }finally{isPulling=false}
+}
+
+async function pushToCloud(){
+  if(!currentUser||!sb||isPulling)return;
+  setSyncStatus('syncing');
+  try{
+    const {error}=await sb.from('finanzas_data').upsert({user_id:currentUser.id,data:S,modules:modulesCustom},{onConflict:'user_id'});
+    if(error)throw error;
+    setSyncStatus('synced','Guardado '+new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}));
+  }catch(err){
+    console.error('Push error:',err);
+    setSyncStatus(navigator.onLine?'error':'offline',err.message);
+  }
+}
+
+function scheduleCloudSync(){
+  if(!currentUser)return;
+  if(syncTimer)clearTimeout(syncTimer);
+  syncTimer=setTimeout(pushToCloud,800);
+}
+
+async function sendMagicLink(){
+  const email=document.getElementById('login-email').value.trim();
+  if(!email||!email.includes('@'))return toast('Email inválido','error');
+  setSyncStatus('syncing','Enviando link...');
+  const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
+  if(error){toast('Error: '+error.message,'error');setSyncStatus('local');return}
+  toast('✉️ Revisa tu email y haz click en el link');
+  document.getElementById('login-status').innerHTML=`<div style="background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.3);border-radius:12px;padding:14px;margin-top:14px;font-size:.88rem">📧 Te envié un link de acceso a <b>${email}</b>. Ábrelo y volverás aquí ya logueado. <br><br><b>Tip:</b> abre el link en el mismo navegador donde estás ahora.</div>`;
+}
+
+async function logoutSupabase(){
+  if(!sb)return;
+  await sb.auth.signOut();
+  currentUser=null;
+  setSyncStatus('local');
+  rerender();
+  toast('Sesión cerrada (datos siguen locales)');
 }
 
 /* ---------- INDEXEDDB para recibos (fotos) ---------- */
@@ -789,10 +902,30 @@ function renderConfig(){
   document.getElementById('page-sub').textContent='Categorías, respaldo y datos';
   document.getElementById('page-actions').innerHTML='';
   document.getElementById('view-container').innerHTML=`
-    <div class="card" style="margin-bottom:18px;border:2px solid rgba(0,212,255,.4);background:linear-gradient(135deg,rgba(0,212,255,.08),rgba(123,47,255,.06))">
+    <div class="card" style="margin-bottom:18px;border:2px solid ${currentUser?'rgba(0,212,138,.5)':'rgba(0,212,255,.4)'};background:linear-gradient(135deg,${currentUser?'rgba(0,212,138,.08)':'rgba(0,212,255,.08)'},rgba(123,47,255,.06))">
+      <h3>☁️ Sincronización en la nube</h3>
+      ${currentUser?`
+        <p style="color:var(--muted);font-size:.9rem;margin-bottom:12px">Conectado como <b style="color:var(--green)">${currentUser.email}</b></p>
+        <p style="font-size:.85rem;color:var(--muted);margin-bottom:14px">✓ Tus cambios se sincronizan automáticamente entre todos tus dispositivos. Abre la app en otro celular o PC con este mismo email y verás los mismos datos.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="pullFromCloud()">⬇️ Bajar de la nube</button>
+          <button class="btn btn-outline" onclick="pushToCloud()">⬆️ Subir ahora</button>
+          <button class="btn btn-ghost" onclick="logoutSupabase()">Cerrar sesión</button>
+        </div>
+      `:`
+        <p style="color:var(--muted);font-size:.9rem;margin-bottom:14px">Inicia sesión con tu email para que tus datos se sincronicen automáticamente entre el PC y el celular. Sin contraseñas — te enviamos un link mágico.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch">
+          <input class="icone-input" id="login-email" placeholder="tu@email.com" type="email" style="flex:1;min-width:220px" autocomplete="email">
+          <button class="btn btn-primary" onclick="sendMagicLink()">✉️ Enviar link</button>
+        </div>
+        <div id="login-status"></div>
+      `}
+    </div>
+
+    <div class="card" style="margin-bottom:18px;border:1px solid rgba(255,140,0,.3)">
       <h3>🔄 ¿Algo no se guarda o se ve raro?</h3>
       <p style="color:var(--muted);font-size:.9rem;margin-bottom:14px">Si la app no se actualiza después de guardar, es porque tienes datos viejos en caché. Este botón limpia TODO y vuelve a cargar los saldos iniciales frescos.</p>
-      <button class="btn btn-primary btn-lg" onclick="forceReset()" style="width:100%">🔄 Reiniciar app con datos limpios</button>
+      <button class="btn btn-outline btn-lg" onclick="forceReset()" style="width:100%">🔄 Reiniciar app con datos limpios</button>
     </div>
     <div class="grid-2">
       <div class="card"><h3>💾 Respaldo de datos</h3>
@@ -1018,6 +1151,8 @@ document.addEventListener('mousemove',e=>{
   initParticles();
   rerender();
   if(seeded)setTimeout(()=>toast('✓ Saldos iniciales cargados ($3.760.384)'),600);
+  // Inicializar sincronización (no bloquea el render)
+  initSupabase();
 })();
 </script>
 </body>
