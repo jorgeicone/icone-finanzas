@@ -251,7 +251,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.8</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.9</b></div>
       <div style="margin-top:2px">Build 2026-06-09</div>
     </div>
   </aside>
@@ -323,6 +323,7 @@ function loadState(){
 function saveState(){
   localStorage.setItem(STORE_KEY,JSON.stringify(S));
   localStorage.setItem(STORE_KEY+'_modules',JSON.stringify(modulesCustom));
+  localStorage.setItem(STORE_KEY+'_ts',Date.now().toString());
   scheduleCloudSync();
 }
 
@@ -364,7 +365,7 @@ async function initSupabase(){
   if(currentUser){await pullFromCloud()}else{setSyncStatus('local')}
 }
 
-async function pullFromCloud(){
+async function pullFromCloud(forceOverwrite=false){
   if(!currentUser||!sb)return;
   setSyncStatus('pulling');
   isPulling=true;
@@ -372,11 +373,24 @@ async function pullFromCloud(){
     const {data,error}=await sb.from('finanzas_data').select('*').eq('user_id',currentUser.id).maybeSingle();
     if(error)throw error;
     if(data&&data.data&&Object.keys(data.data).length){
-      // Hay datos en la nube — la nube manda
+      // Comparar timestamps — solo bajar si la nube es MÁS NUEVA que lo local
+      const cloudTs=new Date(data.updated_at).getTime();
+      const localTs=parseInt(localStorage.getItem(STORE_KEY+'_ts')||'0');
+      const localSaldos=(S.saldos||[]).length;
+      const cloudSaldos=(data.data.saldos||[]).length;
+
+      if(!forceOverwrite && localTs>cloudTs && localSaldos>=cloudSaldos){
+        // Local es más nuevo Y tiene al menos los mismos registros → subimos en vez de bajar
+        await pushToCloud();
+        toast('⬆️ Local es más reciente: subimos a la nube');
+        return;
+      }
+
       S={...S,...data.data};
       modulesCustom=data.modules||[];
       localStorage.setItem(STORE_KEY,JSON.stringify(S));
       localStorage.setItem(STORE_KEY+'_modules',JSON.stringify(modulesCustom));
+      localStorage.setItem(STORE_KEY+'_ts',cloudTs.toString());
       rerender();
       setSyncStatus('synced','Actualizado '+new Date(data.updated_at).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}));
       toast('☁️ Datos descargados de la nube');
@@ -396,18 +410,51 @@ async function pushToCloud(){
   try{
     const {error}=await sb.from('finanzas_data').upsert({user_id:currentUser.id,data:S,modules:modulesCustom},{onConflict:'user_id'});
     if(error)throw error;
-    setSyncStatus('synced','Guardado '+new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}));
+    const now=new Date();
+    localStorage.setItem(STORE_KEY+'_ts',now.getTime().toString());
+    setSyncStatus('synced','☁️ Subido '+now.toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',second:'2-digit'}));
   }catch(err){
     console.error('Push error:',err);
     setSyncStatus(navigator.onLine?'error':'offline',err.message);
+    toast('⚠️ No se subió a la nube: '+err.message,'error');
   }
 }
 
 function scheduleCloudSync(){
   if(!currentUser)return;
   if(syncTimer)clearTimeout(syncTimer);
-  syncTimer=setTimeout(pushToCloud,800);
+  syncTimer=setTimeout(pushToCloud,200); // bajado de 800ms a 200ms
 }
+
+// Forzar push síncrono antes de cerrar la pestaña/app (evita perder ediciones recientes)
+window.addEventListener('beforeunload',()=>{
+  if(!currentUser||!syncTimer)return;
+  clearTimeout(syncTimer);syncTimer=null;
+  // Usar sendBeacon para garantizar que el request se envíe aunque la página cierre
+  try{
+    const url=`${SUPABASE_URL}/rest/v1/finanzas_data?on_conflict=user_id`;
+    const blob=new Blob([JSON.stringify({user_id:currentUser.id,data:S,modules:modulesCustom})],{type:'application/json'});
+    // sendBeacon no permite headers personalizados — usamos fetch con keepalive como respaldo
+    fetch(url,{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey':SUPABASE_ANON_KEY,
+        'Authorization':'Bearer '+(sb?.auth?.session?.()?.access_token||''),
+        'Prefer':'resolution=merge-duplicates'
+      },
+      body:JSON.stringify({user_id:currentUser.id,data:S,modules:modulesCustom}),
+      keepalive:true
+    }).catch(()=>{});
+  }catch(e){}
+});
+
+// Sincronizar al volver al foreground (tab activo de nuevo)
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&currentUser){
+    pullFromCloud();
+  }
+});
 
 async function sendMagicLink(){
   const email=document.getElementById('login-email').value.trim();
