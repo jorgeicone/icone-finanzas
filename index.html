@@ -251,8 +251,8 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.7</b></div>
-      <div style="margin-top:2px">Build 2026-05-24</div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.8</b></div>
+      <div style="margin-top:2px">Build 2026-06-09</div>
     </div>
   </aside>
 
@@ -417,6 +417,34 @@ async function sendMagicLink(){
   if(error){toast('Error: '+error.message,'error');setSyncStatus('local');return}
   toast('✉️ Revisa tu email y haz click en el link');
   document.getElementById('login-status').innerHTML=`<div style="background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.3);border-radius:12px;padding:14px;margin-top:14px;font-size:.88rem">📧 Te envié un link de acceso a <b>${email}</b>. Ábrelo y volverás aquí ya logueado. <br><br><b>Tip:</b> abre el link en el mismo navegador donde estás ahora.</div>`;
+}
+
+async function loginWithPassword(){
+  const email=document.getElementById('login-email').value.trim();
+  const pass=document.getElementById('login-pass').value;
+  if(!email||!email.includes('@'))return toast('Email inválido','error');
+  if(!pass||pass.length<6)return toast('Contraseña debe tener al menos 6 caracteres','error');
+  setSyncStatus('syncing','Iniciando sesión...');
+  const {error}=await sb.auth.signInWithPassword({email,password:pass});
+  if(error){
+    // Si la cuenta no tiene contraseña aún (entró con magic link antes), tratar de crear
+    if(error.message.includes('Invalid login')){
+      toast('Si nunca creaste contraseña, usa el magic link primero y luego crea una desde Configuración','error');
+    }else{
+      toast('Error: '+error.message,'error');
+    }
+    setSyncStatus('local');return;
+  }
+  toast('✓ Bienvenido');
+}
+
+async function setPassword(){
+  const newPass=prompt('Crea una contraseña (mínimo 6 caracteres) para poder entrar desde la app instalada sin magic link:');
+  if(!newPass)return;
+  if(newPass.length<6)return toast('Mínimo 6 caracteres','error');
+  const {error}=await sb.auth.updateUser({password:newPass});
+  if(error)return toast('Error: '+error.message,'error');
+  toast('✓ Contraseña creada. Ahora puedes entrar con email + contraseña');
 }
 
 async function logoutSupabase(){
@@ -910,14 +938,27 @@ function renderConfig(){
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="pullFromCloud()">⬇️ Bajar de la nube</button>
           <button class="btn btn-outline" onclick="pushToCloud()">⬆️ Subir ahora</button>
+          <button class="btn btn-success" onclick="setPassword()">🔑 Crear contraseña</button>
           <button class="btn btn-ghost" onclick="logoutSupabase()">Cerrar sesión</button>
         </div>
+        <p style="font-size:.78rem;color:var(--muted);margin-top:10px">💡 Crea una contraseña para entrar fácil desde la app instalada en el celular (sin magic link).</p>
       `:`
-        <p style="color:var(--muted);font-size:.9rem;margin-bottom:14px">Inicia sesión con tu email para que tus datos se sincronicen automáticamente entre el PC y el celular. Sin contraseñas — te enviamos un link mágico.</p>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch">
-          <input class="icone-input" id="login-email" placeholder="tu@email.com" type="email" style="flex:1;min-width:220px" autocomplete="email">
-          <button class="btn btn-primary" onclick="sendMagicLink()">✉️ Enviar link</button>
+        <p style="color:var(--muted);font-size:.9rem;margin-bottom:14px">Inicia sesión para sincronizar datos entre tus dispositivos.</p>
+
+        <div class="field" style="margin-bottom:10px"><label>Email</label>
+          <input class="icone-input" id="login-email" placeholder="tu@email.com" type="email" autocomplete="email">
         </div>
+        <div class="field" style="margin-bottom:14px"><label>Contraseña (si ya creaste una)</label>
+          <input class="icone-input" id="login-pass" placeholder="••••••" type="password" autocomplete="current-password">
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="loginWithPassword()">🔑 Entrar con contraseña</button>
+          <button class="btn btn-outline" onclick="sendMagicLink()">✉️ O usar magic link</button>
+        </div>
+        <p style="font-size:.78rem;color:var(--muted);margin-top:12px">
+          <b>Primera vez?</b> Usa magic link. Después podrás crear una contraseña desde Configuración (más cómodo para el celular).
+        </p>
         <div id="login-status"></div>
       `}
     </div>
