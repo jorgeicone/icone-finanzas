@@ -251,7 +251,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.9</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.10</b></div>
       <div style="margin-top:2px">Build 2026-06-09</div>
     </div>
   </aside>
@@ -503,6 +503,17 @@ async function logoutSupabase(){
   toast('Sesión cerrada (datos siguen locales)');
 }
 
+async function manualRefresh(){
+  if(!currentUser){
+    toast('Inicia sesión primero en Configuración','error');
+    return;
+  }
+  const btn=document.getElementById('refresh-btn');
+  if(btn){btn.style.pointerEvents='none';btn.innerHTML='⏳ Bajando...'}
+  await pullFromCloud(true); // force overwrite con los datos de la nube
+  if(btn){btn.style.pointerEvents='';btn.innerHTML='🔄 Refrescar'}
+}
+
 /* ---------- INDEXEDDB para recibos (fotos) ---------- */
 let DB=null;
 function openDB(){
@@ -539,6 +550,7 @@ function registerModule(m){modules.push(m)}
    =================================================== */
 registerModule({
   id:'dashboard',label:'Dashboard',icon:'📊',sub:'Resumen financiero consolidado',
+  actions:`<button class="btn btn-outline btn-sm" onclick="manualRefresh()" id="refresh-btn">🔄 Refrescar</button>`,
   render(){
     const mk=monthKey();
     const totalSaldo=getSaldoConsolidado();
