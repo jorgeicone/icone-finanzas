@@ -269,7 +269,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.21</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.22</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
@@ -1349,18 +1349,32 @@ function delMov(tipo,id){
    Aquí NUNCA hay una API key: este repo es público.
    ═══════════════════════════════════════════════════════════ */
 const PROXY_URL=SUPABASE_URL+'/functions/v1/claude-proxy';
-const MODELO_VISION='claude-opus-5';
+/* Sonnet 5 y no Opus 5: el Edge Function de Supabase corta la petición a los
+   ~150 s y devuelve 503. Con Opus una factura densa se pasaba de ese techo y
+   la lectura moría sin resultado. Sonnet responde en una fracción del tiempo
+   y para leer cifras y clasificar con un esquema fijo alcanza de sobra. */
+const MODELO_VISION='claude-sonnet-5';
+const TOPE_ESPERA_MS=110000;      // por debajo del corte del servidor
 let _escaneo=null;
 
-async function llamarClaude(payload){
+async function llamarClaude(payload,{tope=TOPE_ESPERA_MS}={}){
   if(!sb)throw new Error('Supabase no inicializó');
   const {data:{session}}=await sb.auth.getSession();
   if(!session)throw new Error('Inicia sesión en Configuración para usar la IA');
-  const r=await fetch(PROXY_URL,{
-    method:'POST',
-    headers:{'content-type':'application/json','authorization':'Bearer '+session.access_token,'apikey':SUPABASE_ANON_KEY},
-    body:JSON.stringify(payload)
-  });
+  const ctrl=new AbortController();
+  const reloj=setTimeout(()=>ctrl.abort(),tope);
+  let r;
+  try{
+    r=await fetch(PROXY_URL,{
+      method:'POST',
+      headers:{'content-type':'application/json','authorization':'Bearer '+session.access_token,'apikey':SUPABASE_ANON_KEY},
+      body:JSON.stringify(payload),signal:ctrl.signal
+    });
+  }catch(e){
+    if(e.name==='AbortError')throw new Error('La lectura tardó demasiado y se canceló. Prueba con una foto más recortada, o registra el gasto a mano.');
+    throw new Error('No hubo conexión con el servidor. Revisa tu internet.');
+  }finally{clearTimeout(reloj)}
+  if(r.status===503)throw new Error('El servidor cortó la lectura por tiempo. Suele pasar con facturas muy largas: recorta la foto a la parte de los productos y vuelve a intentar.');
   const j=await r.json().catch(()=>({error:'Respuesta ilegible del servidor'}));
   if(!r.ok)throw new Error(j.error||('Error '+r.status));
   return j;
@@ -1486,10 +1500,10 @@ function vocabularioSubcategorias(){
   return ent.map(([cat,subs])=>`- ${cat}: ${subs.join(', ')}`).join('\n');
 }
 
-async function extraerGastos(img,esfuerzo){
+async function extraerGastos(img,esfuerzo,opts){
   const r=await llamarClaude({
     model:MODELO_VISION,
-    max_tokens:8000,
+    max_tokens:5000,
     system:SISTEMA_FACTURA,
     output_config:{effort:esfuerzo,format:{type:'json_schema',schema:esquemaFactura()}},
     messages:[{role:'user',content:[
@@ -1499,7 +1513,7 @@ async function extraerGastos(img,esfuerzo){
 Subcategorías que esta persona ya usa (reutiliza la que encaje antes de inventar una nueva):
 ${vocabularioSubcategorias()}`}
     ]}]
-  });
+  },opts);
   let res;
   try{res=JSON.parse(r.text)}catch(_){throw new Error('La IA no devolvió un JSON legible')}
   return {res,usage:r.usage};
@@ -1540,19 +1554,21 @@ async function onEscaneoPick(e){
   const t0=arrancarCrono();
 
   try{
-    // 1ª pasada en esfuerzo medio: la clasificación por finalidad sí exige
-    // criterio, y el análisis del establecimiento va escrito en el JSON,
-    // así que el razonamiento sale barato sin volver la espera eterna.
-    let {res,usage}=await extraerGastos(img,'medium');
-    let esfuerzoUsado='normal';
+    // 1ª pasada en esfuerzo bajo. El razonamiento por etapas ya va escrito
+    // en el propio JSON (establecimiento → ítems), así que no hace falta
+    // gastarlo además en pensar largo.
+    let {res,usage}=await extraerGastos(img,'low');
+    let esfuerzoUsado='rápido';
+    const gastadoMs=performance.now()-t0;
 
-    // Red de seguridad: si quedó dudando o no encontró nada, repite
-    // con el máximo de detalle. La precisión manda sobre la velocidad.
-    if(res.confianza==='baja'||!(res.items||[]).length){
+    // Red de seguridad: si quedó dudando, repite con más detalle. Pero solo
+    // si la primera fue rápida: si ya tardó, un segundo intento largo choca
+    // contra el corte del servidor y perderíamos también el primer resultado.
+    if((res.confianza==='baja'||!(res.items||[]).length)&&gastadoMs<35000){
       pintarCargando(img,'Imagen difícil — revisando con más detalle');
       arrancarCrono();
       try{
-        const seg=await extraerGastos(img,'high');
+        const seg=await extraerGastos(img,'high',{tope:TOPE_ESPERA_MS-gastadoMs});
         if((seg.res.items||[]).length>=(res.items||[]).length){res=seg.res;usage=seg.usage;esfuerzoUsado='detallado'}
       }catch(_){/* si la 2ª falla, nos quedamos con la 1ª */}
     }
