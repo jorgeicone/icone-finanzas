@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="ICONE Finanzas">
+  <defs>
+    <!-- Degradado de marca: cian -> azul -> morado. Brillante a proposito:
+         es lo que le da silueta al icono contra la barra del navegador,
+         clara u oscura. El render 3D anterior fallaba justo aqui. -->
+    <linearGradient id="plate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00d4ff"/>
+      <stop offset=".42" stop-color="#1d8aff"/>
+      <stop offset="1" stop-color="#7b2fff"/>
+    </linearGradient>
+    <!-- Luz superior izquierda: profundidad sin ruido fotografico -->
+    <radialGradient id="luz" cx=".26" cy=".18" r=".85">
+      <stop offset="0" stop-color="#fff" stop-opacity=".28"/>
+      <stop offset=".55" stop-color="#fff" stop-opacity=".06"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Sombra propia del simbolo: lo despega de la placa -->
+    <filter id="sombra" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="4" stdDeviation="3" flood-color="#04102a" flood-opacity=".32"/>
+    </filter>
+  </defs>
+
+  <rect width="256" height="256" rx="60" fill="url(#plate)"/>
+  <rect width="256" height="256" rx="60" fill="url(#luz)"/>
+  <!-- Bisel: linea clara arriba, linea oscura abajo -->
+  <rect x=".75" y=".75" width="254.5" height="254.5" rx="59.25" fill="none" stroke="#fff" stroke-opacity=".34" stroke-width="1.5"/>
+  <path d="M4 196a60 60 0 0 0 56 56h136a60 60 0 0 0 56-56v0" fill="none" stroke="#0a1030" stroke-opacity=".16" stroke-width="8"/>
+
+  <!-- Signo de pesos dibujado como trazo, no como texto: no depende de
+       ninguna fuente y conserva el grosor a 16px. -->
+  <g filter="url(#sombra)">
+    <rect x="118.5" y="48" width="19" height="160" rx="9.5" fill="#fff"/>
+    <path d="M170 100c0-18-18-28-42-28s-42 9-42 26c0 17 20 24 42 30s42 14 42 31c0 17-18 26-42 26s-42-10-42-28"
+          fill="none" stroke="#fff" stroke-width="27" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
