@@ -8,8 +8,13 @@
 <meta http-equiv="Expires" content="0">
 <meta name="theme-color" content="#050d1f">
 <title>ICONE Finanzas | Gestión Financiera Personal</title>
-<link rel="icon" type="image/png" sizes="64x64" href="img/icono-64.png">
-<link rel="apple-touch-icon" sizes="192x192" href="img/icono-192.png">
+<!-- El SVG es el maestro: el navegador lo escala sin que el signo $ se
+     empaste a 16px. Los PNG quedan de respaldo para navegadores viejos y
+     porque iOS no acepta SVG en apple-touch-icon. -->
+<link rel="icon" type="image/svg+xml" href="img/icono.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="img/icono-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="img/icono-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="img/icono-180.png">
 <link rel="manifest" href="manifest.webmanifest">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -41,11 +46,12 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .app{display:flex;min-height:100vh;position:relative;z-index:2}
 .sidebar{width:var(--sidebar-w);background:rgba(5,13,31,.85);backdrop-filter:blur(12px);border-right:1px solid rgba(0,212,255,.15);padding:24px 16px;position:fixed;height:100vh;overflow-y:auto;z-index:10}
 .brand{display:flex;align-items:center;gap:10px;margin-bottom:28px;padding:0 8px}
-/* El logo es la misma imagen que el icono de la app: el render 3D de la
-   moneda en vidrio. Antes aquí había un SVG plano dibujado a mano. */
-.brand-logo{width:44px;height:44px;border-radius:12px;object-fit:cover;display:block;flex-shrink:0;
-  box-shadow:0 8px 24px -8px rgba(0,212,255,.5),0 4px 12px rgba(123,47,255,.28);
-  border:1px solid rgba(255,255,255,.10)}
+/* El logo es el mismo icono de la app. El render 3D de la moneda en vidrio
+   se veía como una mancha oscura: vidrio oscuro sobre barra oscura, sin
+   silueta. Ahora es la placa con degradado de marca y el $ blanco, que es
+   lo que se lee tanto aquí a 44px como en la pestaña a 16px. */
+.brand-logo{width:44px;height:44px;border-radius:10px;display:block;flex-shrink:0;
+  box-shadow:0 8px 24px -8px rgba(0,212,255,.5),0 4px 12px rgba(123,47,255,.28)}
 .brand-name{font-weight:800;font-size:1.05rem;line-height:1.1}
 .brand-name small{display:block;font-size:.65rem;color:var(--muted);font-weight:500;letter-spacing:1px;text-transform:uppercase;margin-top:2px}
 .nav-section{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;padding:14px 12px 6px}
@@ -247,7 +253,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
   <!-- SIDEBAR -->
   <aside class="sidebar" id="sidebar">
     <div class="brand">
-      <img class="brand-logo" src="img/icono-192.png" alt="ICONE Finanzas" width="44" height="44">
+      <img class="brand-logo" src="img/icono.svg" alt="ICONE Finanzas" width="44" height="44">
       <div class="brand-name">ICONE Finanzas<small>ialabs</small></div>
     </div>
 
@@ -267,7 +273,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.23</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.24</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
