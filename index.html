@@ -41,9 +41,11 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .app{display:flex;min-height:100vh;position:relative;z-index:2}
 .sidebar{width:var(--sidebar-w);background:rgba(5,13,31,.85);backdrop-filter:blur(12px);border-right:1px solid rgba(0,212,255,.15);padding:24px 16px;position:fixed;height:100vh;overflow-y:auto;z-index:10}
 .brand{display:flex;align-items:center;gap:10px;margin-bottom:28px;padding:0 8px}
-.brand-logo{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#00d4ff 0%,#1d8aff 50%,#7b2fff 100%);display:grid;place-items:center;box-shadow:0 8px 24px -6px rgba(0,212,255,.55),0 4px 12px rgba(123,47,255,.35),inset 0 1px 0 rgba(255,255,255,.3);position:relative;overflow:hidden}
-.brand-logo::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.25),transparent 50%);pointer-events:none}
-.brand-logo svg{width:24px;height:32px;position:relative;z-index:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
+/* El logo es la misma imagen que el icono de la app: el render 3D de la
+   moneda en vidrio. Antes aquí había un SVG plano dibujado a mano. */
+.brand-logo{width:44px;height:44px;border-radius:12px;object-fit:cover;display:block;flex-shrink:0;
+  box-shadow:0 8px 24px -8px rgba(0,212,255,.5),0 4px 12px rgba(123,47,255,.28);
+  border:1px solid rgba(255,255,255,.10)}
 .brand-name{font-weight:800;font-size:1.05rem;line-height:1.1}
 .brand-name small{display:block;font-size:.65rem;color:var(--muted);font-weight:500;letter-spacing:1px;text-transform:uppercase;margin-top:2px}
 .nav-section{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;padding:14px 12px 6px}
@@ -245,11 +247,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
   <!-- SIDEBAR -->
   <aside class="sidebar" id="sidebar">
     <div class="brand">
-      <div class="brand-logo">
-        <svg viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">
-          <path d="M13.5 0v3.2c3.8.5 6.5 2.9 6.5 6.3 0 3.6-2.8 5.5-7 6.3l-1.5.3v6.5c1.9-.3 3-1.3 3-2.7 0-.5-.1-.9-.3-1.3h4.2c.3.7.5 1.5.5 2.3 0 3.7-2.6 6.2-7.4 6.7V32h-3v-4.4c-4.2-.6-6.7-3.1-6.7-6.6 0-.7.1-1.4.3-2h4.3c-.1.4-.2.8-.2 1.2 0 1.5 1.1 2.5 2.3 2.8v-7l-.7-.2C2.8 14.7.5 12.7.5 9.4.5 6 3 3.5 7 3.1V0h6.5zm-3 9.7v-3c-1.3.2-2.1 1-2.1 2 0 .5.4 1 2.1 1zm3 7.7c1.6-.3 2.3-1.1 2.3-2.1 0-.6-.4-1.1-2.3-1.4v3.5z" fill="white"/>
-        </svg>
-      </div>
+      <img class="brand-logo" src="img/icono-192.png" alt="ICONE Finanzas" width="44" height="44">
       <div class="brand-name">ICONE Finanzas<small>ialabs</small></div>
     </div>
 
@@ -269,7 +267,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.22</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.23</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
