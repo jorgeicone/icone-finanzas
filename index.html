@@ -262,7 +262,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.16</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.17</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
@@ -675,7 +675,12 @@ function toast(msg,type='success'){
 
 /* ---------- MODAL ---------- */
 function openModal(html){document.getElementById('modal-content').innerHTML=html+'<button class="modal-close" onclick="closeModal()">✕</button>';document.getElementById('modal-bg').classList.add('active')}
-function closeModal(){document.getElementById('modal-bg').classList.remove('active')}
+function closeModal(){
+  // Si el micrófono quedó abierto, cerrarlo pase lo que pase: si no, sigue
+  // reanudándose en segundo plano con el modal ya cerrado.
+  if(typeof _voz!=='undefined'&&_voz&&_voz.escuchando){try{vozDetener()}catch(_){}}
+  document.getElementById('modal-bg').classList.remove('active');
+}
 function openImg(src){document.getElementById('img-modal-src').src=src;document.getElementById('img-modal').classList.add('active')}
 
 /* ---------- REGISTRO DE MÓDULOS ---------- */
@@ -1570,38 +1575,87 @@ function vozRevisarBoton(){
   if(b)b.disabled=!document.getElementById('voz-texto').value.trim();
 }
 function vozToggle(){ _voz.escuchando?vozDetener():vozIniciar() }
+
+const ES_MOVIL=/android|iphone|ipad|ipod/i.test(navigator.userAgent||'');
+const VOZ_MAX_REINICIOS=15;      // techo de reanudaciones por sesión
+const VOZ_TOPE_MS=90000;         // pausa sola a los 90 s
+
+function vozLimpiarTimers(){
+  clearTimeout(_voz.timerReinicio);clearTimeout(_voz.timerTope);
+  _voz.timerReinicio=null;_voz.timerTope=null;
+}
+
 function vozIniciar(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR)return toast('Este navegador no reconoce voz','error');
   const rec=new SR();
-  rec.lang='es-CO';rec.continuous=true;rec.interimResults=true;
+  rec.lang='es-CO';
+  // En móvil el modo continuo es inestable (en iOS prácticamente no funciona):
+  // se usa reconocimiento por turnos y se reanuda de forma controlada.
+  rec.continuous=!ES_MOVIL;
+  rec.interimResults=true;
   _voz.texto=document.getElementById('voz-texto').value;
+  _voz.reinicios=0;
+
   rec.onresult=ev=>{
+    const ta=document.getElementById('voz-texto');
+    if(!ta)return vozDetener();      // si cerraste el modal, no seguimos escuchando
     let firme='',provisional='';
     for(let i=ev.resultIndex;i<ev.results.length;i++){
       const t=ev.results[i][0].transcript;
       if(ev.results[i].isFinal)firme+=t; else provisional+=t;
     }
-    if(firme)_voz.texto=(_voz.texto+' '+firme).trim();
-    _voz.parcial=provisional;
-    const ta=document.getElementById('voz-texto');
-    if(ta){ta.value=(_voz.texto+' '+provisional).trim();vozRevisarBoton()}
+    if(firme){_voz.texto=(_voz.texto+' '+firme).trim();_voz.reinicios=0}  // hubo avance real
+    ta.value=(_voz.texto+' '+provisional).trim();
+    vozRevisarBoton();
   };
+
   rec.onerror=ev=>{
+    if(ev.error==='no-speech'||ev.error==='aborted')return;   // benignos: los maneja onend
+    vozDetener();
     vozPintarEstado(ev.error==='not-allowed'
-      ? 'Micrófono bloqueado. Actívalo en los permisos del navegador.'
-      : 'Error de micrófono: '+ev.error);
-    _voz.escuchando=false;vozPintarBoton();
+      ? 'Micrófono bloqueado. Actívalo en los permisos del navegador y vuelve a tocar.'
+      : 'Se interrumpió el micrófono ('+ev.error+'). Toca para seguir.');
   };
-  // En Android el reconocimiento se corta solo cada cierto rato: lo reanudamos.
-  rec.onend=()=>{ if(_voz.escuchando){try{rec.start()}catch(_){}} };
+
+  // El reconocedor se corta solo cada cierto rato, sobre todo en el celular.
+  // Se reanuda CON ESPERA y CON TECHO: reintentar de inmediato y sin límite
+  // era lo que congelaba la pantalla.
+  rec.onend=()=>{
+    if(!_voz.escuchando)return;
+    if(++_voz.reinicios>VOZ_MAX_REINICIOS){
+      vozDetener();
+      return vozPintarEstado('Pausé el micrófono. Revisa el texto, o toca para seguir hablando.');
+    }
+    clearTimeout(_voz.timerReinicio);
+    _voz.timerReinicio=setTimeout(()=>{
+      if(!_voz.escuchando)return;
+      if(!document.getElementById('voz-texto'))return vozDetener();
+      try{rec.start()}
+      catch(_){ vozDetener();vozPintarEstado('Toca para seguir hablando.') }
+    },350);
+  };
+
   _voz.rec=rec;_voz.escuchando=true;
-  try{rec.start()}catch(_){}
-  vozPintarBoton();vozPintarEstado('Escuchando... habla con naturalidad');
+  vozLimpiarTimers();
+  _voz.timerTope=setTimeout(()=>{
+    if(!_voz.escuchando)return;
+    vozDetener();
+    vozPintarEstado('Pausé a los 90 segundos. Revisa el texto, o toca para seguir.');
+  },VOZ_TOPE_MS);
+
+  try{rec.start()}
+  catch(_){ _voz.escuchando=false;vozLimpiarTimers();return vozPintarEstado('No se pudo abrir el micrófono. Escribe el texto abajo.') }
+  vozPintarBoton();
+  vozPintarEstado(ES_MOVIL?'Escuchando... habla en frases cortas':'Escuchando... habla con naturalidad');
 }
+
 function vozDetener(){
   _voz.escuchando=false;
+  vozLimpiarTimers();
   try{_voz.rec&&_voz.rec.stop()}catch(_){}
+  try{_voz.rec&&_voz.rec.abort&&_voz.rec.abort()}catch(_){}
+  _voz.rec=null;
   vozPintarBoton();vozPintarEstado('Listo. Revisa el texto y dale Interpretar.');
 }
 function vozPintarBoton(){
