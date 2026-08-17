@@ -262,7 +262,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.14</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.15</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
@@ -390,6 +390,61 @@ function migrarTaxonomia(){
   S.taxonomia='coicop-2018';
   if(movidos||listaVieja){saveState();console.info(`Taxonomía COICOP aplicada · ${movidos} egreso(s) remapeado(s)`)}
   return movidos;
+}
+
+/* ---------- CAMPO DE SUBCATEGORÍA (desplegable + crear nueva) ----------
+   Las subcategorías viven DENTRO de una categoría, así que la lista se
+   filtra por la categoría elegida en esa misma fila. Si cambias la
+   categoría, la lista se actualiza sola. */
+function opcionesSubcat(cat,sel){
+  const guardadas=(S.subcatEgreso&&S.subcatEgreso[cat])||[];
+  const lista=[...new Set([...guardadas,...(sel?[sel]:[])])].sort((a,b)=>a.localeCompare(b,'es'));
+  return `<option value="">— sin subcategoría —</option>`
+    +lista.map(s=>`<option value="${s.replace(/"/g,'&quot;')}" ${s===sel?'selected':''}>${s}</option>`).join('')
+    +`<option value="__nueva__">➕ Crear nueva…</option>`;
+}
+function campoSubcat(cat,sel,ancho='130px'){
+  return `<span class="sub-wrap" style="display:inline-block;min-width:${ancho}">
+    <select class="icone-select sub-sel" style="width:100%" onchange="subcatCambio(this)">${opcionesSubcat(cat,sel||'')}</select>
+    <input class="icone-input sub-nueva" style="display:none;width:100%" placeholder="nombre nuevo…"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}" onblur="subcatNueva(this)">
+  </span>`;
+}
+function subcatCambio(sel){
+  if(sel.value!=='__nueva__')return;
+  const w=sel.closest('.sub-wrap'),inp=w.querySelector('.sub-nueva');
+  sel.style.display='none';inp.style.display='';inp.value='';inp.focus();
+}
+function subcatNueva(inp){
+  const w=inp.closest('.sub-wrap'),sel=w.querySelector('.sub-sel');
+  const nombre=inp.value.trim();
+  // No se registra todavía en el vocabulario: eso pasa al guardar el gasto,
+  // así una etiqueta escrita y luego descartada no ensucia la lista.
+  sel.innerHTML=opcionesSubcat(categoriaDeCampo(w),nombre);
+  inp.style.display='none';sel.style.display='';
+}
+function categoriaDeCampo(w){
+  const tr=w.closest('tr');
+  if(tr&&tr.querySelector('.esc-cat'))return tr.querySelector('.esc-cat').value;
+  if(w.closest('#esc-grupo'))return document.getElementById('esc-grupo-cat')?.value||'';
+  return document.getElementById('f-cat')?.value||'';
+}
+function valorSubcat(w){
+  if(!w)return '';
+  const inp=w.querySelector('.sub-nueva');
+  if(inp&&inp.style.display!=='none'&&inp.value.trim())return inp.value.trim();
+  const v=w.querySelector('.sub-sel').value;
+  return v==='__nueva__'?'':v;
+}
+/* Cuando cambia la categoría, la lista de subcategorías la sigue. */
+function refrescarSubcat(w,cat){
+  if(!w)return;
+  const sel=w.querySelector('.sub-sel');
+  const actual=sel.value==='__nueva__'?'':sel.value;
+  const sigueValiendo=((S.subcatEgreso&&S.subcatEgreso[cat])||[]).includes(actual);
+  sel.innerHTML=opcionesSubcat(cat,sigueValiendo?actual:'');
+  w.querySelector('.sub-nueva').style.display='none';
+  sel.style.display='';
 }
 
 /* Registra una subcategoría nueva dentro de su división. Así la app
@@ -954,11 +1009,10 @@ function formMov(tipo,id){
     <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
       <div class="field"><label>Fecha</label><input type="date" class="icone-input" id="f-fecha" value="${m.fecha}"></div>
       <div class="field"><label>Monto (COP)</label><input type="number" step="any" class="icone-input" id="f-monto" value="${m.monto}" placeholder="0"></div>
-      <div class="field"><label>Categoría</label><select class="icone-select" id="f-cat">${cats.map(c=>`<option ${m.categoria===c?'selected':''}>${c}</option>`).join('')}</select></div>
+      <div class="field"><label>Categoría</label><select class="icone-select" id="f-cat" onchange="refrescarSubcat(document.querySelector('#modal-content .sub-wrap'),this.value)">${cats.map(c=>`<option ${m.categoria===c?'selected':''}>${c}</option>`).join('')}</select></div>
       ${tipo==='ing'?`<div class="field"><label>Fuente</label><input class="icone-input" id="f-fuente" value="${m.fuente||''}" placeholder="Empresa, cliente..."></div>`:`<div class="field"><label>Método de pago</label><select class="icone-select" id="f-metodo">${S.metodos.map(x=>`<option ${m.metodo===x?'selected':''}>${x}</option>`).join('')}</select></div>`}
     </div>
-    ${tipo==='eg'?`<datalist id="f-datalist-sub">${[...new Set(Object.values(S.subcatEgreso||{}).flat())].map(s=>`<option value="${s.replace(/"/g,'&quot;')}">`).join('')}</datalist>
-    <div class="field" style="margin-top:12px"><label>Subcategoría</label><input class="icone-input" id="f-sub" list="f-datalist-sub" value="${(m.subcategoria||'').replace(/"/g,'&quot;')}" placeholder="etiqueta corta: mercado semanal, salida en pareja..."></div>`:''}
+    ${tipo==='eg'?`<div class="field" style="margin-top:12px"><label>Subcategoría</label>${campoSubcat(m.categoria,m.subcategoria,'100%')}</div>`:''}
     <div class="field" style="margin-top:12px"><label>Nota</label><textarea class="icone-input" id="f-nota" rows="2" placeholder="Detalle...">${m.nota||''}</textarea></div>
     <div class="field" style="margin-top:14px">
       <label>Recibos / Comprobantes (fotos)</label>
@@ -1011,7 +1065,7 @@ async function saveMov(tipo,id){
   if(tipo==='ing')data.fuente=document.getElementById('f-fuente').value.trim();
   else{
     data.metodo=document.getElementById('f-metodo').value;
-    data.subcategoria=(document.getElementById('f-sub')?.value||'').trim();
+    data.subcategoria=valorSubcat(document.querySelector('#modal-content .sub-wrap'));
     aprenderSubcategoria(data.categoria,data.subcategoria);
   }
 
@@ -1294,18 +1348,15 @@ function renderRevisionEscaneo(){
       <td><input type="checkbox" class="esc-chk" checked onchange="recalcEscaneo()"></td>
       <td><input class="icone-input esc-desc" value="${(it.descripcion||'').replace(/"/g,'&quot;')}" style="min-width:140px">
           ${salida?'<div style="color:var(--orange);font-size:.72rem;margin-top:2px">↗ sacado del giro del negocio</div>':''}</td>
-      <td><select class="icone-select esc-cat" onchange="recalcEscaneo()">${opcionesCat(it.categoria)}</select></td>
-      <td><input class="icone-input esc-sub" list="esc-datalist-sub" value="${(it.subcategoria||'').replace(/"/g,'&quot;')}" placeholder="etiqueta" style="min-width:110px"></td>
+      <td><select class="icone-select esc-cat" onchange="refrescarSubcat(this.closest('tr').querySelector('.sub-wrap'),this.value);recalcEscaneo()">${opcionesCat(it.categoria)}</select></td>
+      <td>${campoSubcat(it.categoria,it.subcategoria,'120px')}</td>
       <td><select class="icone-select esc-met">${S.metodos.map(x=>`<option ${it.metodo===x?'selected':''}>${x}</option>`).join('')}</select></td>
       <td><input type="date" class="icone-input esc-fecha" value="${f}"></td>
       <td><input type="number" step="any" class="icone-input esc-monto" value="${it.monto}" style="max-width:110px;text-align:right" oninput="recalcEscaneo()"></td>
     </tr>`;
   }).join('');
 
-  const todasSubs=[...new Set(Object.values(S.subcatEgreso||{}).flat())];
-
   openModal(`<h2>🧾 Revisa lo que encontré</h2>
-    <datalist id="esc-datalist-sub">${todasSubs.map(s=>`<option value="${s.replace(/"/g,'&quot;')}">`).join('')}</datalist>
     <div style="display:flex;gap:14px;align-items:flex-start;margin:12px 0 14px">
       <img src="${imagen.dataUrl}" style="width:110px;border-radius:12px;border:1px solid var(--card-border);cursor:zoom-in" onclick="openImg(_escaneo.imagen.dataUrl)">
       <div style="flex:1;display:flex;flex-direction:column;gap:8px">
@@ -1335,8 +1386,8 @@ function renderRevisionEscaneo(){
     <div id="esc-grupo" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--card-border);border-radius:12px">
       <div style="font-size:.82rem;color:var(--muted);margin-bottom:8px">Al agruparlo, todo queda bajo una sola categoría:</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <div class="field" style="flex:2;min-width:200px"><label>Categoría del gasto agrupado</label><select class="icone-select" id="esc-grupo-cat">${opcionesCat('')}</select></div>
-        <div class="field" style="flex:1;min-width:140px"><label>Subcategoría</label><input class="icone-input" id="esc-grupo-sub" list="esc-datalist-sub" placeholder="etiqueta"></div>
+        <div class="field" style="flex:2;min-width:200px"><label>Categoría del gasto agrupado</label><select class="icone-select" id="esc-grupo-cat" onchange="refrescarSubcat(document.querySelector('#esc-grupo .sub-wrap'),this.value)">${opcionesCat('')}</select></div>
+        <div class="field" style="flex:1;min-width:150px"><label>Subcategoría</label>${campoSubcat('','','150px')}</div>
       </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
@@ -1376,9 +1427,13 @@ function recalcEscaneo(){
     const seVeAhora=grupo.style.display!=='none';
     grupo.style.display=agrupar?'block':'none';
     if(agrupar&&!seVeAhora&&reparto.length){
-      document.getElementById('esc-grupo-cat').value=reparto[0][0];
-      const fDom=sel.find(tr=>tr.querySelector('.esc-cat').value===reparto[0][0]);
-      document.getElementById('esc-grupo-sub').value=fDom?fDom.querySelector('.esc-sub').value:'';
+      const catDom=reparto[0][0];
+      document.getElementById('esc-grupo-cat').value=catDom;
+      const fDom=sel.find(tr=>tr.querySelector('.esc-cat').value===catDom);
+      const wGrupo=document.querySelector('#esc-grupo .sub-wrap');
+      refrescarSubcat(wGrupo,catDom);
+      const subDom=fDom?valorSubcat(fDom.querySelector('.sub-wrap')):'';
+      if(subDom)wGrupo.querySelector('.sub-sel').innerHTML=opcionesSubcat(catDom,subDom);
     }
   }
 
@@ -1393,7 +1448,7 @@ async function guardarEscaneo(){
   const datos=sel.map(tr=>({
     descripcion:tr.querySelector('.esc-desc').value.trim(),
     categoria:tr.querySelector('.esc-cat').value,
-    subcategoria:tr.querySelector('.esc-sub').value.trim(),
+    subcategoria:valorSubcat(tr.querySelector('.sub-wrap')),
     metodo:tr.querySelector('.esc-met').value,
     fecha:tr.querySelector('.esc-fecha').value||today(),
     monto:parseFloat(tr.querySelector('.esc-monto').value)||0
@@ -1411,7 +1466,7 @@ async function guardarEscaneo(){
     // Un solo gasto = una sola categoría: la que elegiste arriba, no la de la
     // primera fila. Por defecto viene propuesta la que más pesa en la factura.
     const cat=document.getElementById('esc-grupo-cat').value;
-    const sub=document.getElementById('esc-grupo-sub').value.trim();
+    const sub=valorSubcat(document.querySelector('#esc-grupo .sub-wrap'));
     S.egresos.push({id:uid(),fecha:datos[0].fecha,monto:datos.reduce((a,b)=>a+b.monto,0),
       categoria:cat,subcategoria:sub,metodo:datos[0].metodo,
       nota:(pre+datos.map(d=>d.descripcion).join(', ')).slice(0,300),recibos:[rec.id]});
