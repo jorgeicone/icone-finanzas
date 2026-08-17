@@ -8,10 +8,9 @@
 <meta http-equiv="Expires" content="0">
 <meta name="theme-color" content="#050d1f">
 <title>ICONE Finanzas | Gestión Financiera Personal</title>
-<!-- Ícono inline SVG: gradiente cyan→púrpura con signo $ -->
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%2300d4ff'/><stop offset='1' stop-color='%237b2fff'/></linearGradient></defs><rect width='256' height='256' rx='56' fill='url(%23g)'/><text x='128' y='180' font-family='Inter,Arial,sans-serif' font-size='180' font-weight='900' fill='white' text-anchor='middle' letter-spacing='-6'>$</text></svg>">
-<link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%2300d4ff'/><stop offset='1' stop-color='%237b2fff'/></linearGradient></defs><rect width='256' height='256' rx='56' fill='url(%23g)'/><text x='128' y='180' font-family='Inter,Arial,sans-serif' font-size='180' font-weight='900' fill='white' text-anchor='middle' letter-spacing='-6'>$</text></svg>">
-<link rel="manifest" href="data:application/json;charset=utf-8,{%22name%22:%22ICONE%20Finanzas%22,%22short_name%22:%22Finanzas%22,%22start_url%22:%22./%22,%22display%22:%22standalone%22,%22background_color%22:%22%23050d1f%22,%22theme_color%22:%22%23050d1f%22,%22icons%22:[{%22src%22:%22data:image/svg+xml;utf8,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20viewBox=%270%200%20256%20256%27%3E%3Cdefs%3E%3ClinearGradient%20id=%27g%27%20x1=%270%27%20y1=%270%27%20x2=%271%27%20y2=%271%27%3E%3Cstop%20offset=%270%27%20stop-color=%27%2300d4ff%27/%3E%3Cstop%20offset=%271%27%20stop-color=%27%237b2fff%27/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width=%27256%27%20height=%27256%27%20rx=%2756%27%20fill=%27url(%23g)%27/%3E%3Ctext%20x=%27128%27%20y=%27180%27%20font-family=%27Inter,Arial,sans-serif%27%20font-size=%27180%27%20font-weight=%27900%27%20fill=%27white%27%20text-anchor=%27middle%27%20letter-spacing=%27-6%27%3E$%3C/text%3E%3C/svg%3E%22,%22sizes%22:%22any%22,%22type%22:%22image/svg+xml%22}]}">
+<link rel="icon" type="image/png" sizes="64x64" href="img/icono-64.png">
+<link rel="apple-touch-icon" sizes="192x192" href="img/icono-192.png">
+<link rel="manifest" href="manifest.webmanifest">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -28,6 +27,14 @@ html,body{height:100%}
 body{background:var(--navy);color:var(--white);font-family:'SF Pro Display','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;overflow-x:hidden;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-0.01em}
 button,input,select,textarea{font-family:inherit;letter-spacing:inherit}
 body::before{content:"";position:fixed;inset:0;background:radial-gradient(ellipse at top left,rgba(123,47,255,.15),transparent 50%),radial-gradient(ellipse at bottom right,rgba(0,212,255,.12),transparent 50%);pointer-events:none;z-index:0}
+/* Fotografía de fondo por sección. El degradado va DENTRO de la misma capa,
+   así el oscurecimiento viaja siempre con la imagen y el texto encima
+   conserva contraste pase lo que pase. */
+body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background-image:linear-gradient(rgba(5,13,31,.84),rgba(5,13,31,.95)),var(--fondo-seccion,none);
+  background-size:cover;background-position:center;background-repeat:no-repeat;
+  transition:background-image .4s ease}
+@media (prefers-reduced-motion:reduce){body::after{transition:none}}
 #particles{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.45}
 
 /* Layout */
@@ -262,7 +269,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.19</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.20</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
@@ -2231,6 +2238,13 @@ function renderConfig(){
           <div style="font-size:.84rem;color:var(--muted);margin-bottom:8px">Las categorías siguen <b>COICOP 2018</b>, la clasificación de consumo de los hogares de Naciones Unidas y base del IPC del DANE. Las subcategorías las va aprendiendo la app de tus propios recibos.</div>
           <button class="btn btn-outline btn-sm" onclick="reclasificarHistorico()">🔄 Reclasificar mis gastos anteriores con IA</button>
         </div>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--card-border)">
+          <label style="display:flex;gap:10px;align-items:center;cursor:pointer;font-size:.9rem">
+            <input type="checkbox" id="cfg-fondos" ${S.config?.fondos!==false?'checked':''} onchange="alternarFondos(this.checked)">
+            Mostrar fotografía de fondo en cada sección
+          </label>
+          <div style="font-size:.8rem;color:var(--muted);margin-top:6px">Pesan 289 KB en total y se guardan en caché la primera vez. Si prefieres el fondo liso, apágalo aquí.</div>
+        </div>
       </div>
     </div>
     <div class="card" style="margin-top:18px"><h3>🧩 Módulos personalizados</h3>
@@ -2368,8 +2382,25 @@ function renderNav(){
 
 function go(id){currentView=id;rerender();if(window.innerWidth<=900)document.getElementById('sidebar').classList.remove('open')}
 
+/* Fondo fotográfico por sección. Las imágenes son WebP de ~40 KB y viven
+   en /img; el oscurecimiento va en el mismo degradado para que el texto
+   nunca pierda contraste. Se puede apagar desde Configuración. */
+const FONDOS=['dashboard','saldos','ingresos','egresos','recibos','config'];
+function alternarFondos(v){
+  S.config=S.config||{};S.config.fondos=v;
+  saveState();pintarFondoSeccion();
+  toast(v?'Fondos activados':'Fondo liso activado');
+}
+function pintarFondoSeccion(){
+  const activo=S.config?.fondos!==false;
+  const cual=FONDOS.includes(currentView)?currentView:'dashboard';
+  document.body.style.setProperty('--fondo-seccion',
+    activo?`url("img/fondo-${cual}.webp")`:'none');
+}
+
 function rerender(){
   renderNav();
+  pintarFondoSeccion();
   if(currentView==='config'){renderConfig();return}
   const builtin=modules.find(m=>m.id===currentView);
   if(builtin){
