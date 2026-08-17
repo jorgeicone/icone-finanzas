@@ -262,7 +262,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.18</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.19</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
@@ -720,7 +720,19 @@ registerModule({
       </div>
 
       <div class="grid-2">
-        <div class="card"><h3>🍩 Distribución de egresos por categoría (mes)</h3><div class="chart-wrap"><canvas id="ch-cat"></canvas></div></div>
+        <div class="card">
+          <h3 id="ch-cat-titulo">🍩 Egresos por categoría (mes) <span style="color:var(--muted);font-size:.75rem;font-weight:400">· toca una porción para ver el detalle</span></h3>
+          <div class="chart-wrap"><canvas id="ch-cat"></canvas></div>
+        </div>
+        <div class="card"><h3>📊 Composición del gasto por mes</h3><div class="chart-wrap"><canvas id="ch-comp"></canvas></div></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card"><h3>🏆 Top subcategorías (histórico)</h3><div class="chart-wrap"><canvas id="ch-sub"></canvas></div></div>
+        <div class="card"><h3>💚 Tasa de ahorro por mes</h3><div class="chart-wrap"><canvas id="ch-ahorro"></canvas></div></div>
+      </div>
+
+      <div>
         <div class="card"><h3>🕒 Últimos movimientos</h3>
           ${ultimos.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Categoría</th><th style="text-align:right">Monto</th></tr></thead><tbody>${ultimos.map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${m.tipo==='ing'?'green':'orange'}">${m.tipo==='ing'?'Ingreso':'Egreso'}</span></td><td>${m.categoria||'—'}</td><td style="text-align:right" class="amount ${m.tipo==='ing'?'pos':'neg'}">${m.tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="empty-icon">📭</div>Aún no hay movimientos. Empieza registrando un ingreso o un egreso.</div>`}
         </div>
@@ -758,8 +770,88 @@ function getSaldoConsolidado(){
 
 let charts={};
 function destroyChart(k){if(charts[k]){charts[k].destroy();delete charts[k]}}
-const chartColors=['#00d4ff','#7b2fff','#ff8c00','#00d48a','#ffd93d','#ff4757','#3498db','#e056fd','#ff7979'];
-const chartBase={plugins:{legend:{labels:{color:'#fff',font:{size:11}}}},scales:{x:{ticks:{color:'rgba(255,255,255,.7)'},grid:{color:'rgba(255,255,255,.06)'}},y:{ticks:{color:'rgba(255,255,255,.7)',callback:v=>(v/1000).toFixed(0)+'k'},grid:{color:'rgba(255,255,255,.06)'}}},maintainAspectRatio:false,responsive:true};
+/* 13 colores: uno por división COICOP, para que la misma categoría
+   conserve su color en todas las gráficas. */
+const chartColors=['#00d4ff','#7b2fff','#ff8c00','#00d48a','#ffd93d','#ff4757','#3498db','#e056fd','#ff7979','#2dd4bf','#a78bfa','#fbbf24','#f472b6'];
+const colorDeCategoria=c=>{const i=COICOP.findIndex(x=>x.nombre===c);return chartColors[(i<0?0:i)%chartColors.length]};
+
+/* Porcentaje de un punto respecto al total que le corresponde:
+   en circulares, sobre el total del anillo; en barras, sobre el total
+   de esa misma columna (así funciona igual con barras apiladas). */
+function pctDeDato(chart,di,i){
+  const ds=chart.data.datasets[di];
+  const tipo=chart.getDatasetMeta(di).type||chart.config.type;
+  const v=+ds.data[i]||0;
+  let total;
+  if(tipo==='doughnut'||tipo==='pie'){
+    total=ds.data.reduce((a,b)=>a+(+b||0),0);
+  }else{
+    const visibles=chart.data.datasets.filter((_,dj)=>!chart.getDatasetMeta(dj).hidden).length;
+    total=visibles<=1
+      // Una sola serie: el porcentaje útil es cuánto pesa esa barra en el total.
+      ? ds.data.reduce((a,b)=>a+(+b||0),0)
+      // Varias series apiladas: cuánto pesa dentro de su propia columna.
+      : chart.data.datasets.reduce((a,d,dj)=>chart.getDatasetMeta(dj).hidden?a:a+(+d.data[i]||0),0);
+  }
+  return total?v/total:0;
+}
+
+/* Plugin propio que dibuja el % dentro de la gráfica. Se hace a mano
+   en vez de traer chartjs-plugin-datalabels por CDN: una dependencia
+   menos que puede fallar, y este repo carga desde la red lo mínimo. */
+const pluginPorcentaje={
+  id:'porcentaje',
+  afterDatasetsDraw(chart){
+    if(chart.options.sinPorcentaje)return;
+    const tipoBase=chart.config.type;
+    if(tipoBase==='line')return;
+    const ctx=chart.ctx;
+    chart.data.datasets.forEach((ds,di)=>{
+      const meta=chart.getDatasetMeta(di);
+      if(meta.hidden)return;
+      meta.data.forEach((el,i)=>{
+        if(!(+ds.data[i]))return;
+        const pct=pctDeDato(chart,di,i);
+        if(pct<0.05)return;                    // etiqueta ilegible: mejor no pintarla
+        const p=el.tooltipPosition();
+        const txt=(pct*100).toFixed(pct<0.1?1:0)+'%';
+        ctx.save();
+        ctx.font='600 11px system-ui,-apple-system,sans-serif';
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.lineWidth=3;ctx.strokeStyle='rgba(5,13,31,.8)';
+        ctx.strokeText(txt,p.x,p.y);
+        ctx.fillStyle='#fff';ctx.fillText(txt,p.x,p.y);
+        ctx.restore();
+      });
+    });
+  }
+};
+if(window.Chart)Chart.register(pluginPorcentaje);
+
+/* Tooltip que siempre muestra monto y porcentaje. */
+const tooltipPct={
+  backgroundColor:'rgba(5,13,31,.95)',borderColor:'rgba(0,212,255,.3)',borderWidth:1,
+  padding:10,titleFont:{size:12},bodyFont:{size:12},
+  callbacks:{label(ctx){
+    const p=ctx.parsed;
+    const v=typeof p==='number'?p:(ctx.chart.options.indexAxis==='y'?p.x:p.y);
+    const pct=pctDeDato(ctx.chart,ctx.datasetIndex,ctx.dataIndex);
+    const nombre=ctx.dataset.label||ctx.label||'';
+    return ` ${nombre}: ${fmtCOP(v)} · ${(pct*100).toFixed(1)}%`;
+  }}
+};
+
+const chartBase={
+  plugins:{legend:{labels:{color:'#fff',font:{size:11}}},tooltip:tooltipPct},
+  scales:{x:{ticks:{color:'rgba(255,255,255,.7)'},grid:{color:'rgba(255,255,255,.06)'}},
+          y:{ticks:{color:'rgba(255,255,255,.7)',callback:v=>(v/1000).toFixed(0)+'k'},grid:{color:'rgba(255,255,255,.06)'}}},
+  maintainAspectRatio:false,responsive:true,
+  interaction:{mode:'index',intersect:false}
+};
+const chartCircular={
+  plugins:{legend:{position:'right',labels:{color:'#fff',font:{size:11},padding:8}},tooltip:tooltipPct},
+  maintainAspectRatio:false,responsive:true,cutout:'58%'
+};
 
 function renderDashboardCharts(){
   // Evolución de saldos por cuenta
@@ -785,24 +877,129 @@ function renderDashboardCharts(){
     charts.flujo=new Chart(ctx2,{type:'bar',data:{labels:months.map(fmtMonth),datasets:[
       {label:'Ingresos',data:ing,backgroundColor:'rgba(0,212,138,.7)',borderColor:'#00d48a',borderWidth:1},
       {label:'Egresos',data:eg,backgroundColor:'rgba(255,71,87,.7)',borderColor:'#ff4757',borderWidth:1}
-    ]},options:chartBase});
+    ]},options:{...chartBase,
+      // Aquí las barras se comparan entre sí, no componen un total: un
+      // "40% de la columna" no querría decir nada. Se muestra la relación real.
+      sinPorcentaje:true,
+      plugins:{...chartBase.plugins,tooltip:{...tooltipPct,callbacks:{
+        label:c=>` ${c.dataset.label}: ${fmtCOP(c.parsed.y)}`,
+        afterBody(items){
+          const i=items[0].dataIndex, entra=ing[i], sale=eg[i];
+          if(!entra)return sale?'Sin ingresos registrados este mes':'';
+          return `Gastas el ${Math.round(sale/entra*100)}% de lo que entra`;
+        }}}}}});
   }
 
-  // Donut categorías
-  destroyChart('cat');
-  const ctx3=document.getElementById('ch-cat');
-  if(ctx3){
-    const mk=monthKey();
-    const totales={};
-    S.egresos.filter(x=>monthKey(x.fecha)===mk).forEach(e=>{totales[e.categoria]=(totales[e.categoria]||0)+e.monto});
-    const labels=Object.keys(totales);const data=Object.values(totales);
-    if(labels.length){
-      charts.cat=new Chart(ctx3,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:chartColors,borderColor:'#0a1530',borderWidth:2}]},options:{plugins:{legend:{position:'right',labels:{color:'#fff',font:{size:11},padding:8}}},maintainAspectRatio:false,responsive:true,cutout:'62%'}});
+  // Anillo de categorías, con clic para bajar a las subcategorías
+  pintarAnilloCategorias();
+
+  // Composición del gasto por mes (barras apiladas por división)
+  destroyChart('comp');
+  const ctx4=document.getElementById('ch-comp');
+  if(ctx4){
+    const meses=ultimosMeses(6);
+    const divs=[...new Set(S.egresos.map(e=>e.categoria))]
+      .map(c=>({c,t:S.egresos.filter(e=>e.categoria===c).reduce((a,b)=>a+b.monto,0)}))
+      .sort((a,b)=>b.t-a.t).slice(0,6).map(x=>x.c);   // las 6 que más pesan
+    const datasets=divs.map(c=>({
+      label:c,
+      data:meses.map(m=>S.egresos.filter(e=>e.categoria===c&&monthKey(e.fecha)===m).reduce((a,b)=>a+b.monto,0)),
+      backgroundColor:colorDeCategoria(c)+'cc',borderColor:colorDeCategoria(c),borderWidth:1
+    }));
+    charts.comp=new Chart(ctx4,{type:'bar',data:{labels:meses.map(fmtMonth),datasets},
+      options:{...chartBase,scales:{x:{...chartBase.scales.x,stacked:true},y:{...chartBase.scales.y,stacked:true}},
+        plugins:{...chartBase.plugins,legend:{labels:{color:'#fff',font:{size:10},boxWidth:12}}}}});
+  }
+
+  // Top subcategorías, barra horizontal
+  destroyChart('sub');
+  const ctx5=document.getElementById('ch-sub');
+  if(ctx5){
+    const porSub={};
+    S.egresos.filter(e=>e.subcategoria).forEach(e=>{porSub[e.subcategoria]=(porSub[e.subcategoria]||0)+e.monto});
+    const top=Object.entries(porSub).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    if(top.length){
+      charts.sub=new Chart(ctx5,{type:'bar',
+        data:{labels:top.map(x=>x[0]),datasets:[{label:'Gasto',data:top.map(x=>x[1]),
+          backgroundColor:top.map((_,i)=>chartColors[i%chartColors.length]+'cc'),borderWidth:0}]},
+        options:{...chartBase,indexAxis:'y',
+          scales:{x:{...chartBase.scales.y},y:{...chartBase.scales.x}},
+          plugins:{...chartBase.plugins,legend:{display:false}}}});
     }else{
-      ctx3.parentElement.innerHTML='<div class="empty"><div class="empty-icon">🍩</div>Sin egresos este mes</div>';
+      ctx5.parentElement.innerHTML='<div class="empty"><div class="empty-icon">🏆</div>Aún no hay subcategorías</div>';
     }
   }
+
+  // Tasa de ahorro por mes — el indicador que pedía la auditoría
+  destroyChart('ahorro');
+  const ctx6=document.getElementById('ch-ahorro');
+  if(ctx6){
+    const meses=ultimosMeses(6);
+    const tasas=meses.map(m=>{
+      const i=S.ingresos.filter(x=>monthKey(x.fecha)===m).reduce((a,b)=>a+b.monto,0);
+      const g=S.egresos.filter(x=>monthKey(x.fecha)===m).reduce((a,b)=>a+b.monto,0);
+      return i>0?Math.round((1-g/i)*100):null;
+    });
+    charts.ahorro=new Chart(ctx6,{type:'line',
+      data:{labels:meses.map(fmtMonth),datasets:[{label:'Tasa de ahorro',data:tasas,
+        borderColor:'#00d48a',backgroundColor:'rgba(0,212,138,.18)',fill:true,tension:.3,spanGaps:true,
+        pointRadius:5,pointBackgroundColor:'#00d48a'}]},
+      options:{...chartBase,sinPorcentaje:true,
+        scales:{x:chartBase.scales.x,y:{...chartBase.scales.y,ticks:{color:'rgba(255,255,255,.7)',callback:v=>v+'%'}}},
+        plugins:{legend:{display:false},tooltip:{...tooltipPct,callbacks:{label:c=>
+          c.parsed.y===null?' Sin ingresos registrados':` Ahorras el ${c.parsed.y}% de lo que entra`}}}}});
+  }
 }
+
+/* Últimos N meses en formato YYYY-MM, terminando en el actual. */
+function ultimosMeses(n){
+  const out=[],d=new Date();d.setDate(1);
+  for(let i=n-1;i>=0;i--){const x=new Date(d);x.setMonth(d.getMonth()-i);out.push(x.toISOString().slice(0,7))}
+  return out;
+}
+
+/* El anillo tiene dos niveles: divisiones y, al tocar una, sus
+   subcategorías. _anillo guarda en cuál estamos. */
+let _anillo={categoria:null};
+function pintarAnilloCategorias(){
+  destroyChart('cat');
+  const ctx=document.getElementById('ch-cat');
+  if(!ctx)return;
+  const mk=monthKey();
+  const delMes=S.egresos.filter(x=>monthKey(x.fecha)===mk);
+  const titulo=document.getElementById('ch-cat-titulo');
+
+  let totales={},colores;
+  if(_anillo.categoria){
+    delMes.filter(e=>e.categoria===_anillo.categoria).forEach(e=>{
+      const k=e.subcategoria||'(sin subcategoría)';
+      totales[k]=(totales[k]||0)+e.monto;
+    });
+    colores=Object.keys(totales).map((_,i)=>chartColors[i%chartColors.length]);
+    if(titulo)titulo.innerHTML=`🍩 ${_anillo.categoria} <button class="btn btn-ghost btn-sm" onclick="volverAnillo()" style="margin-left:8px">← todas</button>`;
+  }else{
+    delMes.forEach(e=>{totales[e.categoria]=(totales[e.categoria]||0)+e.monto});
+    colores=Object.keys(totales).map(colorDeCategoria);
+    if(titulo)titulo.innerHTML='🍩 Egresos por categoría (mes) <span style="color:var(--muted);font-size:.75rem;font-weight:400">· toca una porción para ver el detalle</span>';
+  }
+
+  const labels=Object.keys(totales),data=Object.values(totales);
+  if(!labels.length){
+    ctx.parentElement.innerHTML='<div class="empty"><div class="empty-icon">🍩</div>Sin egresos este mes</div>';
+    return;
+  }
+  charts.cat=new Chart(ctx,{type:'doughnut',
+    data:{labels,datasets:[{data,backgroundColor:colores,borderColor:'#0a1530',borderWidth:2}]},
+    options:{...chartCircular,
+      onClick(ev,els){
+        if(!els.length||_anillo.categoria)return;      // ya estamos en el detalle
+        _anillo.categoria=labels[els[0].index];
+        pintarAnilloCategorias();
+      },
+      onHover(ev,els){ev.native.target.style.cursor=(els.length&&!_anillo.categoria)?'pointer':'default'}
+    }});
+}
+function volverAnillo(){_anillo.categoria=null;pintarAnilloCategorias()}
 
 /* ===================================================
    MÓDULO: SALDOS BANCARIOS
@@ -980,7 +1177,7 @@ function renderMovList(tipo){
       <div class="kpi orange"><div class="kpi-label">Promedio mensual</div><div class="kpi-value">${fmtCOP(avgMonthly(arr))}</div></div>
     </div>
     <div class="grid-2">
-      <div class="card"><h3>📊 Por categoría</h3>${Object.keys(porCat).length?`<div class="bar-chart" style="display:flex;flex-direction:column;gap:10px">${Object.entries(porCat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>{const p=(v/totTot)*100;return `<div style="display:grid;grid-template-columns:130px 1fr 110px;gap:10px;align-items:center;font-size:.85rem"><span>${k}</span><div style="background:rgba(255,255,255,.08);border-radius:50px;height:8px;overflow:hidden"><div style="width:${p}%;height:100%;background:linear-gradient(90deg,${tipo==='ing'?'var(--green),var(--cyan)':'var(--orange),var(--red)'});border-radius:50px"></div></div><span class="amount" style="text-align:right">${fmtCOP(v)}</span></div>`}).join('')}</div>`:'<div class="empty">Sin datos</div>'}</div>
+      <div class="card"><h3>📊 Por categoría <span style="color:var(--muted);font-size:.75rem;font-weight:400">${tipo==='eg'?'· toca una barra para ver sus subcategorías':''}</span></h3>${Object.keys(porCat).length?`<div class="chart-wrap-sm"><canvas id="ch-cat-${tipo}"></canvas></div>`:'<div class="empty">Sin datos</div>'}</div>
       <div class="card"><h3>📅 Últimos 6 meses</h3><div class="chart-wrap-sm"><canvas id="ch-mov-${tipo}"></canvas></div></div>
     </div>
     <div class="card" style="margin-top:18px"><h3>📋 Movimientos</h3>
@@ -1001,6 +1198,42 @@ function renderMovChart(tipo){
   for(let i=5;i>=0;i--){const x=new Date(d);x.setMonth(d.getMonth()-i);months.push(x.toISOString().slice(0,7))}
   const data=months.map(m=>arr.filter(x=>monthKey(x.fecha)===m).reduce((a,b)=>a+b.monto,0));
   charts[id]=new Chart(ctx,{type:'bar',data:{labels:months.map(fmtMonth),datasets:[{label:tipo==='ing'?'Ingresos':'Egresos',data,backgroundColor:tipo==='ing'?'rgba(0,212,138,.7)':'rgba(255,71,87,.7)',borderColor:tipo==='ing'?'#00d48a':'#ff4757',borderWidth:1}]},options:chartBase});
+  pintarBarrasCategoria(tipo);
+}
+
+/* Barras por categoría, con clic para bajar a subcategorías (solo egresos). */
+let _barraCat={};
+function pintarBarrasCategoria(tipo){
+  const id='ch-cat-'+tipo;
+  const ctx=document.getElementById(id);if(!ctx)return;
+  destroyChart(id);
+  const arr=tipo==='ing'?S.ingresos:S.egresos;
+  const abierta=_barraCat[tipo];
+  const totales={};
+  if(abierta){
+    arr.filter(x=>x.categoria===abierta).forEach(x=>{
+      const k=x.subcategoria||'(sin subcategoría)';totales[k]=(totales[k]||0)+x.monto});
+  }else{
+    arr.forEach(x=>{totales[x.categoria]=(totales[x.categoria]||0)+x.monto});
+  }
+  const orden=Object.entries(totales).sort((a,b)=>b[1]-a[1]);
+  if(!orden.length)return;
+  charts[id]=new Chart(ctx,{type:'bar',
+    data:{labels:orden.map(x=>x[0]),datasets:[{label:abierta||'Total',data:orden.map(x=>x[1]),
+      backgroundColor:orden.map(([k],i)=>tipo==='eg'&&!abierta?colorDeCategoria(k)+'cc':chartColors[i%chartColors.length]+'cc'),borderWidth:0}]},
+    options:{...chartBase,indexAxis:'y',
+      scales:{x:{...chartBase.scales.y},y:{...chartBase.scales.x,ticks:{color:'rgba(255,255,255,.7)',font:{size:10}}}},
+      plugins:{...chartBase.plugins,legend:{display:false},
+        title:abierta?{display:true,text:'▲ '+abierta+' — toca para volver',color:'#00d4ff',font:{size:11}}:{display:false}},
+      onClick(ev,els){
+        if(tipo!=='eg')return;
+        if(abierta){_barraCat[tipo]=null}
+        else if(els.length){_barraCat[tipo]=orden[els[0].index][0]}
+        else return;
+        pintarBarrasCategoria(tipo);
+      },
+      onHover(ev,els){ev.native.target.style.cursor=(tipo==='eg'&&(els.length||abierta))?'pointer':'default'}
+    }});
 }
 
 let _pendingRecibos=[]; // recibos a guardar al confirmar formulario
