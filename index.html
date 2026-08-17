@@ -262,7 +262,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.13</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.14</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
@@ -310,6 +310,31 @@ const uid=()=>Math.random().toString(36).slice(2,10)+Date.now().toString(36).sli
 const today=()=>new Date().toISOString().slice(0,10);
 const monthKey=d=>(d||today()).slice(0,7);
 
+/* ═══════════════════════════════════════════════════════════
+   TAXONOMÍA DE GASTO — COICOP 2018 (Naciones Unidas)
+   Clasificación del Consumo Individual por Finalidad: el estándar
+   internacional de gasto de los hogares, y la base que usa el DANE
+   para el IPC colombiano. Las 13 divisiones, en lenguaje corriente.
+   La clave del diseño: "Restaurantes y alojamiento" es una división
+   aparte del mercado, así que un restaurante o un hotel NUNCA caen
+   en el gasto de comida del día a día.
+   ═══════════════════════════════════════════════════════════ */
+const COICOP=[
+ {cod:'01',nombre:'Mercado y bebidas',                guia:'Comida y bebida NO alcohólica para preparar o consumir en casa: supermercado, plaza, tienda de barrio, panadería, carnicería, domicilios de mercado. NO incluye comer fuera.'},
+ {cod:'02',nombre:'Alcohol y tabaco',                 guia:'Licor, cerveza, vino y cigarrillos comprados para llevar. Si se consumieron en un bar o restaurante van en Restaurantes y alojamiento.'},
+ {cod:'03',nombre:'Ropa y calzado',                   guia:'Prendas de vestir, zapatos, accesorios de vestir, telas, sastrería, lavandería.'},
+ {cod:'04',nombre:'Vivienda y servicios del hogar',   guia:'Arriendo, administración, cuota hipotecaria, agua, luz, gas, aseo, mantenimiento y reparación de la vivienda.'},
+ {cod:'05',nombre:'Muebles y artículos del hogar',    guia:'Muebles, electrodomésticos, menaje, ropa de cama, herramientas, jardín, productos de aseo del hogar y servicio doméstico.'},
+ {cod:'06',nombre:'Salud',                            guia:'Medicamentos, consultas, exámenes, odontología, terapias, óptica, hospitalización, medicina prepagada.'},
+ {cod:'07',nombre:'Transporte',                       guia:'Vehículo y su uso: compra, gasolina, mantenimiento, parqueadero, peajes, impuestos y trámites del carro. Taxi, bus, metro y tiquetes aéreos.'},
+ {cod:'08',nombre:'Comunicaciones y tecnología',      guia:'Plan de celular, internet, telefonía, correo, equipos telefónicos y de cómputo, y suscripciones de software o nube.'},
+ {cod:'09',nombre:'Recreación, deporte y cultura',    guia:'Entretenimiento y tiempo libre: cine, conciertos, museos, gimnasio, deportes, juguetes, videojuegos, libros, mascotas, streaming de entretenimiento, paquetes turísticos y excursiones.'},
+ {cod:'10',nombre:'Educación',                        guia:'Matrículas, pensiones, cursos, diplomados, capacitaciones y material educativo formal.'},
+ {cod:'11',nombre:'Restaurantes y alojamiento',       guia:'Consumo fuera de casa: restaurantes, cafeterías, bares, comidas rápidas, domicilios de comida preparada, y hoteles, hostales y alojamiento. Aquí entra TODO lo consumido dentro de un hotel o un restaurante.'},
+ {cod:'12',nombre:'Seguros y servicios financieros',  guia:'Pólizas y seguros de todo tipo, cuotas de manejo, intereses, comisiones bancarias, asesoría financiera y legal.'},
+ {cod:'13',nombre:'Cuidado personal y otros',         guia:'Peluquería, barbería, productos de aseo personal, cosméticos, joyería, marroquinería, regalos, donaciones y todo lo que no encaje en las demás divisiones.'}
+];
+
 /* ---------- ESTADO ---------- */
 let S={
   cuentas:[],
@@ -317,7 +342,9 @@ let S={
   ingresos:[],   // {id,fecha,monto,categoria,fuente,nota,recibos:[]}
   egresos:[],    // {id,fecha,monto,categoria,metodo,nota,recibos:[]}
   catIngreso:['Salario','Freelance','Inversiones','Ventas','Reembolso','Otros'],
-  catEgreso:['Vivienda','Alimentación','Transporte','Servicios','Salud','Educación','Ocio','Ropa','Otros'],
+  catEgreso:[...COICOP.map(c=>c.nombre)],
+  subcatEgreso:{},   // { "Categoría": ["subcategoría aprendida", ...] }
+  taxonomia:'coicop-2018',
   metodos:['Efectivo','Tarjeta débito','Tarjeta crédito','Transferencia','PSE','Nequi','Daviplata'],
   config:{moneda:'COP',frecuencia:'mensual',nombre:'Mi finanzas'}
 };
@@ -330,6 +357,49 @@ function loadState(){
     const m=localStorage.getItem(STORE_KEY+'_modules');
     if(m)modulesCustom=JSON.parse(m);
   }catch(e){console.error(e)}
+  migrarTaxonomia();
+}
+
+/* Equivalencias de la taxonomía vieja (9 categorías caseras) a COICOP.
+   Conservador a propósito: mueve cada gasto a su división más cercana y
+   deja `categoriaPrevia` en el registro, así nada se pierde y es reversible. */
+const MAPA_TAXONOMIA_VIEJA={
+  'Vivienda':'Vivienda y servicios del hogar',
+  'Servicios':'Vivienda y servicios del hogar',
+  'Alimentación':'Mercado y bebidas',
+  'Transporte':'Transporte',
+  'Ocio':'Recreación, deporte y cultura',
+  'Salud':'Salud',
+  'Educación':'Educación',
+  'Ropa':'Ropa y calzado',
+  'Otros':'Cuidado personal y otros'
+};
+function migrarTaxonomia(){
+  const nuevas=COICOP.map(c=>c.nombre);
+  const listaVieja=(S.catEgreso||[]).some(c=>(c in MAPA_TAXONOMIA_VIEJA)&&!nuevas.includes(c));
+  let movidos=0;
+  (S.egresos||[]).forEach(e=>{
+    if(e.categoria&&!nuevas.includes(e.categoria)&&MAPA_TAXONOMIA_VIEJA[e.categoria]){
+      e.categoriaPrevia=e.categoria;
+      e.categoria=MAPA_TAXONOMIA_VIEJA[e.categoria];
+      movidos++;
+    }
+  });
+  if(listaVieja)S.catEgreso=nuevas;
+  if(!S.subcatEgreso||typeof S.subcatEgreso!=='object')S.subcatEgreso={};
+  S.taxonomia='coicop-2018';
+  if(movidos||listaVieja){saveState();console.info(`Taxonomía COICOP aplicada · ${movidos} egreso(s) remapeado(s)`)}
+  return movidos;
+}
+
+/* Registra una subcategoría nueva dentro de su división. Así la app
+   va aprendiendo tu vocabulario en vez de imponerte uno fijo. */
+function aprenderSubcategoria(cat,sub){
+  sub=(sub||'').trim();
+  if(!cat||!sub)return;
+  if(!S.subcatEgreso[cat])S.subcatEgreso[cat]=[];
+  const yaEsta=S.subcatEgreso[cat].some(x=>x.toLowerCase()===sub.toLowerCase());
+  if(!yaEsta)S.subcatEgreso[cat].push(sub);
 }
 function saveState(){
   localStorage.setItem(STORE_KEY,JSON.stringify(S));
@@ -399,6 +469,7 @@ async function pullFromCloud(forceOverwrite=false){
 
       S={...S,...data.data};
       modulesCustom=data.modules||[];
+      migrarTaxonomia();   // los datos de la nube pueden venir con la taxonomía vieja
       localStorage.setItem(STORE_KEY,JSON.stringify(S));
       localStorage.setItem(STORE_KEY+'_modules',JSON.stringify(modulesCustom));
       localStorage.setItem(STORE_KEY+'_ts',cloudTs.toString());
@@ -854,7 +925,7 @@ function renderMovList(tipo){
     </div>
     <div class="card" style="margin-top:18px"><h3>📋 Movimientos</h3>
       ${arr.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Categoría</th><th>${tipo==='ing'?'Fuente':'Método'}</th><th>Nota</th><th>Recibos</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
-        ${[...arr].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${m.categoria}</span></td><td>${tipo==='ing'?(m.fuente||'—'):(m.metodo||'—')}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.nota||'—'}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')">🗑</button></td></tr>`).join('')}
+        ${[...arr].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${m.categoria}</span>${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${m.subcategoria}</div>`:''}</td><td>${tipo==='ing'?(m.fuente||'—'):(m.metodo||'—')}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.nota||'—'}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')">🗑</button></td></tr>`).join('')}
       </tbody></table></div>`:`<div class="empty"><div class="empty-icon">${tipo==='ing'?'💵':'💸'}</div>No hay ${tipo==='ing'?'ingresos':'egresos'} registrados</div>`}
     </div>
   `;
@@ -886,6 +957,8 @@ function formMov(tipo,id){
       <div class="field"><label>Categoría</label><select class="icone-select" id="f-cat">${cats.map(c=>`<option ${m.categoria===c?'selected':''}>${c}</option>`).join('')}</select></div>
       ${tipo==='ing'?`<div class="field"><label>Fuente</label><input class="icone-input" id="f-fuente" value="${m.fuente||''}" placeholder="Empresa, cliente..."></div>`:`<div class="field"><label>Método de pago</label><select class="icone-select" id="f-metodo">${S.metodos.map(x=>`<option ${m.metodo===x?'selected':''}>${x}</option>`).join('')}</select></div>`}
     </div>
+    ${tipo==='eg'?`<datalist id="f-datalist-sub">${[...new Set(Object.values(S.subcatEgreso||{}).flat())].map(s=>`<option value="${s.replace(/"/g,'&quot;')}">`).join('')}</datalist>
+    <div class="field" style="margin-top:12px"><label>Subcategoría</label><input class="icone-input" id="f-sub" list="f-datalist-sub" value="${(m.subcategoria||'').replace(/"/g,'&quot;')}" placeholder="etiqueta corta: mercado semanal, salida en pareja..."></div>`:''}
     <div class="field" style="margin-top:12px"><label>Nota</label><textarea class="icone-input" id="f-nota" rows="2" placeholder="Detalle...">${m.nota||''}</textarea></div>
     <div class="field" style="margin-top:14px">
       <label>Recibos / Comprobantes (fotos)</label>
@@ -936,7 +1009,11 @@ async function saveMov(tipo,id){
     nota:document.getElementById('f-nota').value.trim()
   };
   if(tipo==='ing')data.fuente=document.getElementById('f-fuente').value.trim();
-  else data.metodo=document.getElementById('f-metodo').value;
+  else{
+    data.metodo=document.getElementById('f-metodo').value;
+    data.subcategoria=(document.getElementById('f-sub')?.value||'').trim();
+    aprenderSubcategoria(data.categoria,data.subcategoria);
+  }
 
   // recibos: guardar nuevos en DB
   for(const r of _pendingRecibos){await dbPut(r)}
@@ -1016,22 +1093,35 @@ function comprimirImagen(file,maxLado=1400,calidad=0.85){
 }
 
 function esquemaFactura(){
+  const cats=COICOP.map(c=>c.nombre);
   return {type:'object',additionalProperties:false,
-    required:['tipo_documento','comercio','fecha','total_documento','confianza','nota','items'],
+    // El orden importa: al exigir `establecimiento` primero, el modelo tiene
+    // que razonar el giro del negocio ANTES de mirar los ítems. Ese análisis
+    // se convierte en el prior con el que luego revisa línea por línea.
+    required:['establecimiento','tipo_documento','fecha','total_documento','confianza','nota','items'],
     properties:{
+      establecimiento:{type:'object',additionalProperties:false,
+        required:['nombre','giro','categoria_probable','razon'],
+        properties:{
+          nombre:{type:'string',description:'Nombre comercial tal como aparece. "" si no se distingue.'},
+          giro:{type:'string',description:'Qué clase de negocio es: hotel, restaurante, café, supermercado, gran superficie mixta, droguería, estación de servicio, tienda de ropa, etc.'},
+          categoria_probable:{type:'string',enum:cats,description:'La división a la que apunta ese giro, antes de mirar los ítems.'},
+          razon:{type:'string',description:'Una frase corta explicando por qué ese giro implica esa división.'}
+        }},
       tipo_documento:{type:'string',enum:['factura','recibo','pantallazo_movimientos','extracto','otro']},
-      comercio:{type:'string',description:'Nombre del comercio o banco. "" si no se distingue.'},
       fecha:{type:'string',description:'Fecha del documento en formato YYYY-MM-DD. "" si no aparece.'},
       total_documento:{type:'number',description:'Total impreso en el documento. 0 si no aparece.'},
       confianza:{type:'string',enum:['alta','media','baja']},
       nota:{type:'string',description:'Qué quedó dudoso o ilegible. "" si todo se leyó bien.'},
       items:{type:'array',description:'Un elemento por cada gasto detectado.',items:{
         type:'object',additionalProperties:false,
-        required:['descripcion','monto','categoria','metodo','fecha'],
+        required:['descripcion','monto','categoria','subcategoria','sigue_prior','metodo','fecha'],
         properties:{
           descripcion:{type:'string'},
           monto:{type:'number',description:'Valor positivo en pesos colombianos, sin separadores.'},
-          categoria:{type:'string',enum:S.catEgreso},
+          categoria:{type:'string',enum:cats},
+          subcategoria:{type:'string',description:'Etiqueta corta y concreta dentro de la división, 1 a 3 palabras.'},
+          sigue_prior:{type:'boolean',description:'true si coincide con categoria_probable; false si este ítem se sale a otra división.'},
           metodo:{type:'string',enum:['',...S.metodos]},
           fecha:{type:'string',description:'YYYY-MM-DD. "" si se usa la del documento.'}
         }
@@ -1039,7 +1129,27 @@ function esquemaFactura(){
     }};
 }
 
-const SISTEMA_FACTURA=`Lees imágenes de facturas, recibos, extractos y pantallazos de apps bancarias colombianas, y extraes los GASTOS que aparecen.
+const SISTEMA_FACTURA=`Lees imágenes de facturas, recibos, extractos y pantallazos de apps bancarias colombianas, extraes los GASTOS y los clasificas según COICOP 2018, la clasificación de consumo de los hogares de Naciones Unidas.
+
+═══ CÓMO CLASIFICAR: primero el negocio, después cada ítem ═══
+
+PASO 1 — Entiende dónde se hizo el gasto. Antes de mirar un solo renglón, identifica qué clase de negocio emitió el documento y a qué división apunta. Un hotel apunta a "Restaurantes y alojamiento". Un restaurante también. Un supermercado apunta a "Mercado y bebidas". Una estación de servicio a "Transporte". Escribe eso en "establecimiento" con una razón de una frase.
+
+PASO 2 — Baja ítem por ítem y confirma o corrige. La división del negocio es tu punto de partida, no tu conclusión. Para cada renglón pregúntate si de verdad pertenece ahí. Marca sigue_prior en true cuando se queda, en false cuando lo sacas.
+
+Cuándo el ítem se QUEDA con la división del negocio:
+- Todo lo consumido dentro de un hotel — habitación, restaurante del hotel, piscina, spa, minibar, lavandería, parqueadero del hotel — es "Restaurantes y alojamiento". Es un consumo de estadía, no de mercado ni de recreación, aunque el renglón diga "almuerzo" o "piscina".
+- Todo lo consumido en un restaurante, café o bar — platos, bebidas, postres, domicilio, propina — es "Restaurantes y alojamiento". Comer fuera NUNCA es "Mercado y bebidas", aunque sean alimentos: la división separa el mercado del día a día del consumo fuera de casa.
+
+Cuándo el ítem se SALE a otra división:
+- Las grandes superficies mixtas (Alkosto, Éxito, Falabella, Jumbo, Makro) venden de todo. Ahí el nombre del almacén no decide nada: decide el producto. En una misma factura de Alkosto, el arroz va a "Mercado y bebidas", una camiseta a "Ropa y calzado", un videojuego a "Recreación, deporte y cultura", un televisor a "Muebles y artículos del hogar" y un celular a "Comunicaciones y tecnología".
+- Lo mismo aplica en menor escala: una droguería que vende maquillaje mezcla "Salud" con "Cuidado personal y otros"; un supermercado que vende licor mezcla "Mercado y bebidas" con "Alcohol y tabaco".
+
+Cuando dudes entre dos divisiones, decide por la FINALIDAD del gasto, no por la naturaleza del producto. Es el criterio de COICOP: la misma cerveza es "Alcohol y tabaco" comprada en la tienda y "Restaurantes y alojamiento" tomada en un bar.
+
+═══ SUBCATEGORÍA ═══
+Además de la división, dale a cada ítem una subcategoría corta y concreta que describa el gasto en lenguaje cotidiano: 1 a 3 palabras, en minúscula salvo nombres propios. "mercado semanal", "salida en pareja", "gasolina", "hotel familiar", "medicamentos", "regalo cumpleaños". Te pasaré las subcategorías que esta persona ya viene usando: REUTILIZA una existente siempre que describa bien el gasto, y solo inventa una nueva cuando ninguna encaje. Es su vocabulario, no el tuyo — la idea es que con el tiempo se parezca a su vida y no a un catálogo genérico.
+
 
 Formato de cifras en Colombia: el punto separa miles y la coma separa decimales. "$ 1.234.567" son 1234567 pesos, no 1,23. "12.500" son doce mil quinientos. Devuelve siempre el número entero de pesos, sin separadores.
 
@@ -1054,9 +1164,10 @@ Reglas que evitan contar doble:
 - La propina sí es un item aparte, porque es un gasto adicional real.
 - Descuentos y devoluciones no son items; réstalos de la línea que corresponda.
 
-Clasifica cada item en una de las categorías permitidas, la que mejor describa el gasto para finanzas personales. Si dudas entre varias, elige la más general.
+Si la imagen no contiene ningún gasto, devuelve items vacío y explica por qué en "nota". No inventes cifras: si un monto está borroso o cortado, no lo adivines — omite el item y dilo en "nota", y marca la confianza como baja.
 
-Si la imagen no contiene ningún gasto, devuelve items vacío y explica por qué en "nota". No inventes cifras: si un monto está borroso o cortado, no lo adivines — omite el item y dilo en "nota", y marca la confianza como baja.`;
+═══ LAS 13 DIVISIONES ═══
+`+COICOP.map(c=>`${c.cod}. ${c.nombre} — ${c.guia}`).join('\n');
 
 function formEscaneo(){
   _escaneo=null;
@@ -1068,6 +1179,14 @@ function formEscaneo(){
 
 /* Una pasada de lectura. `esfuerzo` controla cuánto razona Claude antes de
    responder: es la palanca que más mueve el tiempo de respuesta. */
+/* Le mostramos el vocabulario que esta persona ya viene usando, para que
+   reutilice sus etiquetas en vez de inventar sinónimos cada vez. */
+function vocabularioSubcategorias(){
+  const ent=Object.entries(S.subcatEgreso||{}).filter(([,v])=>v&&v.length);
+  if(!ent.length)return 'Todavía no hay subcategorías registradas: crea las primeras.';
+  return ent.map(([cat,subs])=>`- ${cat}: ${subs.join(', ')}`).join('\n');
+}
+
 async function extraerGastos(img,esfuerzo){
   const r=await llamarClaude({
     model:MODELO_VISION,
@@ -1076,7 +1195,10 @@ async function extraerGastos(img,esfuerzo){
     output_config:{effort:esfuerzo,format:{type:'json_schema',schema:esquemaFactura()}},
     messages:[{role:'user',content:[
       {type:'image',source:{type:'base64',media_type:img.mediaType,data:img.base64}},
-      {type:'text',text:`Extrae los gastos de esta imagen. Hoy es ${today()}. Si el documento no trae fecha, usa la de hoy.`}
+      {type:'text',text:`Extrae los gastos de esta imagen. Hoy es ${today()}. Si el documento no trae fecha, usa la de hoy.
+
+Subcategorías que esta persona ya usa (reutiliza la que encaje antes de inventar una nueva):
+${vocabularioSubcategorias()}`}
     ]}]
   });
   let res;
@@ -1119,10 +1241,11 @@ async function onEscaneoPick(e){
   const t0=arrancarCrono();
 
   try{
-    // 1ª pasada rápida. Para leer cifras de una factura no hace falta
-    // razonamiento profundo, y así la espera baja mucho.
-    let {res,usage}=await extraerGastos(img,'low');
-    let esfuerzoUsado='rápido';
+    // 1ª pasada en esfuerzo medio: la clasificación por finalidad sí exige
+    // criterio, y el análisis del establecimiento va escrito en el JSON,
+    // así que el razonamiento sale barato sin volver la espera eterna.
+    let {res,usage}=await extraerGastos(img,'medium');
+    let esfuerzoUsado='normal';
 
     // Red de seguridad: si quedó dudando o no encontró nada, repite
     // con el máximo de detalle. La precisión manda sobre la velocidad.
@@ -1159,23 +1282,34 @@ function renderRevisionEscaneo(){
       <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button><button class="btn btn-primary" onclick="formEscaneo()">Probar otra imagen</button></div>`);
   }
 
-  const filas=items.map((it,i)=>{
+  const E=R.establecimiento||{};
+  const opcionesCat=(sel)=>COICOP.map(c=>`<option ${sel===c.nombre?'selected':''}>${c.nombre}</option>`).join('');
+
+  const filas=items.map(it=>{
     const f=/^\d{4}-\d{2}-\d{2}$/.test(it.fecha)?it.fecha:fechaDoc;
-    return `<tr>
+    // Marcamos las líneas que Claude sacó de la división del negocio:
+    // son justo las que vale la pena que revises con ojo.
+    const salida=it.sigue_prior===false;
+    return `<tr${salida?' style="background:rgba(255,140,0,.07)"':''}>
       <td><input type="checkbox" class="esc-chk" checked onchange="recalcEscaneo()"></td>
-      <td><input class="icone-input esc-desc" value="${(it.descripcion||'').replace(/"/g,'&quot;')}" style="min-width:150px"></td>
-      <td><select class="icone-select esc-cat">${S.catEgreso.map(c=>`<option ${it.categoria===c?'selected':''}>${c}</option>`).join('')}</select></td>
+      <td><input class="icone-input esc-desc" value="${(it.descripcion||'').replace(/"/g,'&quot;')}" style="min-width:140px">
+          ${salida?'<div style="color:var(--orange);font-size:.72rem;margin-top:2px">↗ sacado del giro del negocio</div>':''}</td>
+      <td><select class="icone-select esc-cat" onchange="recalcEscaneo()">${opcionesCat(it.categoria)}</select></td>
+      <td><input class="icone-input esc-sub" list="esc-datalist-sub" value="${(it.subcategoria||'').replace(/"/g,'&quot;')}" placeholder="etiqueta" style="min-width:110px"></td>
       <td><select class="icone-select esc-met">${S.metodos.map(x=>`<option ${it.metodo===x?'selected':''}>${x}</option>`).join('')}</select></td>
       <td><input type="date" class="icone-input esc-fecha" value="${f}"></td>
-      <td><input type="number" step="any" class="icone-input esc-monto" value="${it.monto}" style="max-width:120px;text-align:right" oninput="recalcEscaneo()"></td>
+      <td><input type="number" step="any" class="icone-input esc-monto" value="${it.monto}" style="max-width:110px;text-align:right" oninput="recalcEscaneo()"></td>
     </tr>`;
   }).join('');
 
+  const todasSubs=[...new Set(Object.values(S.subcatEgreso||{}).flat())];
+
   openModal(`<h2>🧾 Revisa lo que encontré</h2>
-    <div style="display:flex;gap:14px;align-items:flex-start;margin:12px 0 16px">
+    <datalist id="esc-datalist-sub">${todasSubs.map(s=>`<option value="${s.replace(/"/g,'&quot;')}">`).join('')}</datalist>
+    <div style="display:flex;gap:14px;align-items:flex-start;margin:12px 0 14px">
       <img src="${imagen.dataUrl}" style="width:110px;border-radius:12px;border:1px solid var(--card-border);cursor:zoom-in" onclick="openImg(_escaneo.imagen.dataUrl)">
       <div style="flex:1;display:flex;flex-direction:column;gap:8px">
-        <div class="field"><label>Comercio</label><input class="icone-input" id="esc-comercio" value="${(R.comercio||'').replace(/"/g,'&quot;')}" placeholder="Nombre del comercio"></div>
+        <div class="field"><label>Comercio</label><input class="icone-input" id="esc-comercio" value="${(E.nombre||'').replace(/"/g,'&quot;')}" placeholder="Nombre del comercio"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:.82rem">
           <span class="badge purple">${R.tipo_documento||'documento'}</span>
           <span class="badge ${colorConf}">confianza ${R.confianza||'—'}</span>
@@ -1185,14 +1319,26 @@ function renderRevisionEscaneo(){
         ${R.nota?`<div style="color:var(--yellow);font-size:.82rem">⚠️ ${R.nota}</div>`:''}
       </div>
     </div>
-    <div class="table-wrap" id="esc-tabla" style="max-height:38vh;overflow:auto">
-      <table><thead><tr><th></th><th>Descripción</th><th>Categoría</th><th>Método</th><th>Fecha</th><th style="text-align:right">Monto</th></tr></thead>
+    ${E.giro?`<div class="card" style="padding:10px 14px;margin-bottom:12px;font-size:.84rem">
+      <b style="color:var(--cyan)">Lo leí como ${E.giro}</b> → arranca en <b>${E.categoria_probable||'—'}</b>
+      ${E.razon?`<div style="color:var(--muted);margin-top:3px">${E.razon}</div>`:''}
+      <div style="color:var(--muted);margin-top:3px">Luego revisó cada línea por separado; las resaltadas se salieron de esa división.</div>
+    </div>`:''}
+    <div class="table-wrap" id="esc-tabla" style="max-height:34vh;overflow:auto">
+      <table><thead><tr><th></th><th>Descripción</th><th>Categoría</th><th>Subcategoría</th><th>Método</th><th>Fecha</th><th style="text-align:right">Monto</th></tr></thead>
       <tbody>${filas}</tbody></table>
     </div>
     <div id="esc-resumen" style="margin-top:12px;font-size:.88rem"></div>
     <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:.86rem;color:var(--muted);cursor:pointer">
       <input type="checkbox" id="esc-agrupar" onchange="recalcEscaneo()"> Guardar todo como un solo gasto (en vez de uno por línea)
     </label>
+    <div id="esc-grupo" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--card-border);border-radius:12px">
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:8px">Al agruparlo, todo queda bajo una sola categoría:</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div class="field" style="flex:2;min-width:200px"><label>Categoría del gasto agrupado</label><select class="icone-select" id="esc-grupo-cat">${opcionesCat('')}</select></div>
+        <div class="field" style="flex:1;min-width:140px"><label>Subcategoría</label><input class="icone-input" id="esc-grupo-sub" list="esc-datalist-sub" placeholder="etiqueta"></div>
+      </div>
+    </div>
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary" id="esc-guardar" onclick="guardarEscaneo()">Guardar</button>
@@ -1208,10 +1354,34 @@ function recalcEscaneo(){
   const agrupar=document.getElementById('esc-agrupar').checked;
   const total=_escaneo?.resultado?.total_documento||0;
   const desfase=total?Math.abs(suma-total):0;
+
+  // Reparto por división, para que veas de un vistazo si la factura quedó
+  // partida entre varias categorías (el caso Alkosto).
+  const porCat={};
+  sel.forEach(tr=>{
+    const c=tr.querySelector('.esc-cat').value;
+    porCat[c]=(porCat[c]||0)+(parseFloat(tr.querySelector('.esc-monto').value)||0);
+  });
+  const reparto=Object.entries(porCat).sort((a,b)=>b[1]-a[1]);
+
   document.getElementById('esc-resumen').innerHTML=
     `<b>${sel.length}</b> de ${filas.length} seleccionados · suma <b class="amount neg">${fmtCOP(suma)}</b>`+
     (total&&desfase>1?` · <span style="color:var(--yellow)">no cuadra con el total impreso (${fmtCOP(total)}), diferencia ${fmtCOP(desfase)}</span>`:
-      total?` · <span style="color:var(--green)">cuadra con el total impreso ✓</span>`:'');
+      total?` · <span style="color:var(--green)">cuadra con el total impreso ✓</span>`:'')+
+    (reparto.length>1?`<div style="margin-top:6px;color:var(--muted);font-size:.82rem">Se reparte en ${reparto.length} categorías: ${reparto.map(([c,v])=>`${c} ${fmtCOP(v)}`).join(' · ')}</div>`:'');
+
+  // Bloque de agrupado: al activarlo, propone la categoría que más pesa.
+  const grupo=document.getElementById('esc-grupo');
+  if(grupo){
+    const seVeAhora=grupo.style.display!=='none';
+    grupo.style.display=agrupar?'block':'none';
+    if(agrupar&&!seVeAhora&&reparto.length){
+      document.getElementById('esc-grupo-cat').value=reparto[0][0];
+      const fDom=sel.find(tr=>tr.querySelector('.esc-cat').value===reparto[0][0]);
+      document.getElementById('esc-grupo-sub').value=fDom?fDom.querySelector('.esc-sub').value:'';
+    }
+  }
+
   const btn=document.getElementById('esc-guardar');
   btn.textContent=sel.length?(agrupar?'Guardar 1 gasto':`Guardar ${sel.length} gasto${sel.length>1?'s':''}`):'Guardar';
   btn.disabled=!sel.length;
@@ -1223,6 +1393,7 @@ async function guardarEscaneo(){
   const datos=sel.map(tr=>({
     descripcion:tr.querySelector('.esc-desc').value.trim(),
     categoria:tr.querySelector('.esc-cat').value,
+    subcategoria:tr.querySelector('.esc-sub').value.trim(),
     metodo:tr.querySelector('.esc-met').value,
     fecha:tr.querySelector('.esc-fecha').value||today(),
     monto:parseFloat(tr.querySelector('.esc-monto').value)||0
@@ -1235,18 +1406,122 @@ async function guardarEscaneo(){
 
   const comercio=(document.getElementById('esc-comercio').value||'').trim();
   const pre=comercio?comercio+' · ':'';
-  if(document.getElementById('esc-agrupar').checked){
+  const agrupar=document.getElementById('esc-agrupar').checked;
+  if(agrupar){
+    // Un solo gasto = una sola categoría: la que elegiste arriba, no la de la
+    // primera fila. Por defecto viene propuesta la que más pesa en la factura.
+    const cat=document.getElementById('esc-grupo-cat').value;
+    const sub=document.getElementById('esc-grupo-sub').value.trim();
     S.egresos.push({id:uid(),fecha:datos[0].fecha,monto:datos.reduce((a,b)=>a+b.monto,0),
-      categoria:datos[0].categoria,metodo:datos[0].metodo,
+      categoria:cat,subcategoria:sub,metodo:datos[0].metodo,
       nota:(pre+datos.map(d=>d.descripcion).join(', ')).slice(0,300),recibos:[rec.id]});
+    aprenderSubcategoria(cat,sub);
   }else{
-    datos.forEach(d=>S.egresos.push({id:uid(),fecha:d.fecha,monto:d.monto,categoria:d.categoria,
-      metodo:d.metodo,nota:pre+d.descripcion,recibos:[rec.id]}));
+    datos.forEach(d=>{
+      S.egresos.push({id:uid(),fecha:d.fecha,monto:d.monto,categoria:d.categoria,
+        subcategoria:d.subcategoria,metodo:d.metodo,nota:pre+d.descripcion,recibos:[rec.id]});
+      aprenderSubcategoria(d.categoria,d.subcategoria);
+    });
   }
-  const n=document.getElementById('esc-agrupar').checked?1:datos.length;
+  const n=agrupar?1:datos.length;
   _escaneo=null;
   saveState();closeModal();rerender();
   toast(`✓ ${n} gasto${n>1?'s':''} guardado${n>1?'s':''} desde la factura`);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   RECLASIFICAR EL HISTÓRICO
+   La migración automática solo pudo traducir la etiqueta vieja, y
+   esas etiquetas eran justo el problema (un hotel guardado como
+   "Alimentación" sigue llegando a "Mercado"). Esto relee la nota de
+   cada gasto ya registrado y aplica el criterio nuevo.
+   ═══════════════════════════════════════════════════════════ */
+let _reclas=null;
+
+async function reclasificarHistorico(){
+  const eg=(S.egresos||[]).filter(e=>e.monto>0);
+  if(!eg.length)return toast('No hay egresos para revisar','error');
+
+  openModal(`<h2>🔄 Revisando tus gastos anteriores</h2>
+    <p style="color:var(--muted);margin:12px 0">Releyendo ${eg.length} egreso(s) con el criterio COICOP.</p>
+    <div style="font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums" id="esc-crono">0.0 s</div>`);
+  arrancarCrono();
+
+  const lista=eg.map(e=>`${e.id} | ${e.fecha} | ${fmtCOP(e.monto)} | ${(e.nota||'(sin nota)').slice(0,90)} | actual: ${e.categoria}`).join('\n');
+  try{
+    const r=await llamarClaude({
+      model:MODELO_VISION,max_tokens:8000,
+      system:`Reclasificas gastos ya registrados de una persona en Colombia según COICOP 2018.
+
+Te llega una línea por gasto: id | fecha | monto | descripción | categoría actual. Decide para cada uno la división correcta y una subcategoría corta.
+
+Clasifica por la FINALIDAD del gasto. Lo consumido en un restaurante, café o bar, y todo lo consumido dentro de un hotel, va en "Restaurantes y alojamiento" — nunca en "Mercado y bebidas" ni en "Recreación", aunque el renglón hable de comida o de piscina. El mercado del supermercado sí es "Mercado y bebidas". Los seguros van en "Seguros y servicios financieros" aunque sean del carro. Las suscripciones de software y los planes de celular e internet van en "Comunicaciones y tecnología".
+
+Devuelve SOLO los gastos cuya categoría debe cambiar. Si la actual ya es correcta, omítelo. No inventes ids: usa exactamente los que te doy.
+
+═══ LAS 13 DIVISIONES ═══
+`+COICOP.map(c=>`${c.cod}. ${c.nombre} — ${c.guia}`).join('\n'),
+      output_config:{effort:'medium',format:{type:'json_schema',schema:{
+        type:'object',additionalProperties:false,required:['cambios'],
+        properties:{cambios:{type:'array',items:{
+          type:'object',additionalProperties:false,required:['id','categoria','subcategoria','razon'],
+          properties:{
+            id:{type:'string'},
+            categoria:{type:'string',enum:COICOP.map(c=>c.nombre)},
+            subcategoria:{type:'string'},
+            razon:{type:'string',description:'Media frase: por qué cambia.'}
+          }}}}}}},
+      messages:[{role:'user',content:`Gastos a revisar:\n${lista}\n\nSubcategorías que ya usa:\n${vocabularioSubcategorias()}`}]
+    });
+    clearInterval(_cronoEsc);
+    const {cambios}=JSON.parse(r.text);
+    const validos=(cambios||[]).filter(c=>eg.some(e=>e.id===c.id&&e.categoria!==c.categoria));
+    _reclas=validos;
+    if(!validos.length){
+      return openModal(`<h2>✓ Todo está bien clasificado</h2>
+        <p style="color:var(--muted);margin:12px 0">Revisé ${eg.length} egreso(s) y ninguno necesita cambiar de categoría.</p>
+        <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-primary" onclick="closeModal()">Listo</button></div>`);
+    }
+    openModal(`<h2>🔄 ${validos.length} cambio(s) propuesto(s)</h2>
+      <p style="color:var(--muted);font-size:.86rem;margin:8px 0 12px">De ${eg.length} egresos revisados. Desmarca los que no quieras aplicar.</p>
+      <div class="table-wrap" id="rec-tabla" style="max-height:46vh;overflow:auto">
+        <table><thead><tr><th></th><th>Gasto</th><th>De</th><th>A</th><th>Subcategoría</th></tr></thead><tbody>
+        ${validos.map(c=>{const e=eg.find(x=>x.id===c.id);return `<tr data-id="${c.id}">
+          <td><input type="checkbox" class="rec-chk" checked></td>
+          <td style="max-width:190px"><div>${(e.nota||'—').slice(0,60)}</div><div style="color:var(--muted);font-size:.74rem">${fmtDate(e.fecha)} · ${fmtCOP(e.monto)}</div>
+              <div style="color:var(--muted);font-size:.72rem;font-style:italic">${c.razon||''}</div></td>
+          <td style="color:var(--muted);font-size:.8rem">${e.categoria}</td>
+          <td><span class="badge orange">${c.categoria}</span></td>
+          <td style="font-size:.8rem;color:var(--muted)">${c.subcategoria||'—'}</td>
+        </tr>`}).join('')}
+        </tbody></table>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="aplicarReclasificacion()">Aplicar seleccionados</button>
+      </div>`);
+  }catch(err){
+    clearInterval(_cronoEsc);
+    openModal(`<h2>⚠️ No se pudo revisar</h2><p style="color:var(--red);margin:12px 0">${err.message}</p>
+      <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>`);
+  }
+}
+
+function aplicarReclasificacion(){
+  const ids=[...document.querySelectorAll('#rec-tabla tbody tr')].filter(tr=>tr.querySelector('.rec-chk').checked).map(tr=>tr.dataset.id);
+  let n=0;
+  ids.forEach(id=>{
+    const c=_reclas.find(x=>x.id===id),e=S.egresos.find(x=>x.id===id);
+    if(!c||!e)return;
+    if(!e.categoriaPrevia)e.categoriaPrevia=e.categoria;   // sigue siendo reversible
+    e.categoria=c.categoria;
+    if(c.subcategoria)e.subcategoria=c.subcategoria;
+    aprenderSubcategoria(c.categoria,c.subcategoria);
+    n++;
+  });
+  _reclas=null;
+  saveState();closeModal();rerender();
+  toast(`✓ ${n} gasto(s) reclasificado(s)`);
 }
 
 /* ===================================================
@@ -1338,6 +1613,10 @@ function renderConfig(){
         <div class="field" style="margin-bottom:10px"><label>Categorías de egreso</label><textarea class="icone-input" id="cat-eg" rows="4">${S.catEgreso.join(', ')}</textarea></div>
         <div class="field" style="margin-bottom:10px"><label>Métodos de pago</label><textarea class="icone-input" id="cat-met" rows="2">${S.metodos.join(', ')}</textarea></div>
         <button class="btn btn-primary" onclick="saveCats()">Guardar categorías</button>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--card-border)">
+          <div style="font-size:.84rem;color:var(--muted);margin-bottom:8px">Las categorías siguen <b>COICOP 2018</b>, la clasificación de consumo de los hogares de Naciones Unidas y base del IPC del DANE. Las subcategorías las va aprendiendo la app de tus propios recibos.</div>
+          <button class="btn btn-outline btn-sm" onclick="reclasificarHistorico()">🔄 Reclasificar mis gastos anteriores con IA</button>
+        </div>
       </div>
     </div>
     <div class="card" style="margin-top:18px"><h3>🧩 Módulos personalizados</h3>
