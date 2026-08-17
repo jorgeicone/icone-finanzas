@@ -1,0 +1,8 @@
+# Configuración local de desarrollo (servidor de preview). No va al repo.
+.claude/
+
+# ESTE REPO ES PÚBLICO. Nunca versionar datos financieros ni respaldos.
+# Los respaldos viven fuera del repo, en "6. Finanzas - respaldos".
+*backup*.json
+*respaldo*.json
+finanzas-*.json

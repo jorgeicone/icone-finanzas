@@ -262,8 +262,8 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.11</b></div>
-      <div style="margin-top:2px">Build 2026-06-13</div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.12</b></div>
+      <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
 
@@ -831,7 +831,7 @@ registerModule({
    =================================================== */
 registerModule({
   id:'egresos',label:'Egresos',icon:'💸',sub:'Registro de salidas de dinero',
-  actions:`<button class="btn btn-primary btn-sm" onclick="formMov('eg')">+ Nuevo egreso</button>`,
+  actions:`<button class="btn btn-outline btn-sm" onclick="formEscaneo()">📷 Escanear factura</button> <button class="btn btn-primary btn-sm" onclick="formMov('eg')">+ Nuevo egreso</button>`,
   render(){return renderMovList('eg')}
 });
 
@@ -964,6 +964,244 @@ function delMov(tipo,id){
   if(tipo==='ing')S.ingresos=S.ingresos.filter(x=>x.id!==id);
   else S.egresos=S.egresos.filter(x=>x.id!==id);
   saveState();rerender();toast('Eliminado');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ESCÁNER DE FACTURAS CON IA (visión de Claude)
+   La imagen va del navegador al Edge Function `claude-proxy`,
+   que guarda la ANTHROPIC_API_KEY como secreto del servidor.
+   Aquí NUNCA hay una API key: este repo es público.
+   ═══════════════════════════════════════════════════════════ */
+const PROXY_URL=SUPABASE_URL+'/functions/v1/claude-proxy';
+const MODELO_VISION='claude-opus-5';
+let _escaneo=null;
+
+async function llamarClaude(payload){
+  if(!sb)throw new Error('Supabase no inicializó');
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session)throw new Error('Inicia sesión en Configuración para usar la IA');
+  const r=await fetch(PROXY_URL,{
+    method:'POST',
+    headers:{'content-type':'application/json','authorization':'Bearer '+session.access_token,'apikey':SUPABASE_ANON_KEY},
+    body:JSON.stringify(payload)
+  });
+  const j=await r.json().catch(()=>({error:'Respuesta ilegible del servidor'}));
+  if(!r.ok)throw new Error(j.error||('Error '+r.status));
+  return j;
+}
+
+/* Reduce la foto antes de subirla: menos datos, menos costo, misma lectura. */
+function comprimirImagen(file,maxLado=1600,calidad=0.85){
+  return new Promise((res,rej)=>{
+    const fr=new FileReader();
+    fr.onerror=()=>rej(new Error('No se pudo leer el archivo'));
+    fr.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>rej(new Error('El archivo no es una imagen válida'));
+      img.onload=()=>{
+        let w=img.naturalWidth,h=img.naturalHeight;
+        const esc=Math.min(1,maxLado/Math.max(w,h));
+        w=Math.round(w*esc);h=Math.round(h*esc);
+        const c=document.createElement('canvas');c.width=w;c.height=h;
+        const cx=c.getContext('2d');cx.fillStyle='#fff';cx.fillRect(0,0,w,h);cx.drawImage(img,0,0,w,h);
+        const dataUrl=c.toDataURL('image/jpeg',calidad);
+        res({dataUrl,mediaType:'image/jpeg',base64:dataUrl.split(',')[1],w,h});
+      };
+      img.src=fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+function esquemaFactura(){
+  return {type:'object',additionalProperties:false,
+    required:['tipo_documento','comercio','fecha','total_documento','confianza','nota','items'],
+    properties:{
+      tipo_documento:{type:'string',enum:['factura','recibo','pantallazo_movimientos','extracto','otro']},
+      comercio:{type:'string',description:'Nombre del comercio o banco. "" si no se distingue.'},
+      fecha:{type:'string',description:'Fecha del documento en formato YYYY-MM-DD. "" si no aparece.'},
+      total_documento:{type:'number',description:'Total impreso en el documento. 0 si no aparece.'},
+      confianza:{type:'string',enum:['alta','media','baja']},
+      nota:{type:'string',description:'Qué quedó dudoso o ilegible. "" si todo se leyó bien.'},
+      items:{type:'array',description:'Un elemento por cada gasto detectado.',items:{
+        type:'object',additionalProperties:false,
+        required:['descripcion','monto','categoria','metodo','fecha'],
+        properties:{
+          descripcion:{type:'string'},
+          monto:{type:'number',description:'Valor positivo en pesos colombianos, sin separadores.'},
+          categoria:{type:'string',enum:S.catEgreso},
+          metodo:{type:'string',enum:['',...S.metodos]},
+          fecha:{type:'string',description:'YYYY-MM-DD. "" si se usa la del documento.'}
+        }
+      }}
+    }};
+}
+
+const SISTEMA_FACTURA=`Lees imágenes de facturas, recibos, extractos y pantallazos de apps bancarias colombianas, y extraes los GASTOS que aparecen.
+
+Formato de cifras en Colombia: el punto separa miles y la coma separa decimales. "$ 1.234.567" son 1234567 pesos, no 1,23. "12.500" son doce mil quinientos. Devuelve siempre el número entero de pesos, sin separadores.
+
+Qué devolver según el documento:
+- Pantallazo de movimientos o extracto bancario: un item por cada transacción que sea SALIDA de dinero. Ignora por completo las entradas, los abonos y los saldos.
+- Factura o recibo de una compra: un item por cada línea de producto o servicio que se distinga.
+- Si solo se ve un total y no hay líneas legibles: un único item con ese total.
+
+Reglas que evitan contar doble:
+- Si ya listaste las líneas, NO agregues además un item con el total.
+- Nunca crees un item para el IVA, impuestos, subtotales o el total. En Colombia los precios de las líneas ya suelen incluir IVA.
+- La propina sí es un item aparte, porque es un gasto adicional real.
+- Descuentos y devoluciones no son items; réstalos de la línea que corresponda.
+
+Clasifica cada item en una de las categorías permitidas, la que mejor describa el gasto para finanzas personales. Si dudas entre varias, elige la más general.
+
+Si la imagen no contiene ningún gasto, devuelve items vacío y explica por qué en "nota". No inventes cifras: si un monto está borroso o cortado, no lo adivines — omite el item y dilo en "nota", y marca la confianza como baja.`;
+
+function formEscaneo(){
+  _escaneo=null;
+  openModal(`<h2>📷 Escanear factura</h2>
+    <p style="color:var(--muted);font-size:.88rem;margin-bottom:14px">Toma una foto o sube un pantallazo. La IA lee los gastos, los clasifica y te los deja listos para revisar antes de guardar.</p>
+    <label class="upload-zone" for="esc-file"><div class="upload-icon">🧾</div><div>Toca para tomar la foto o elegir una imagen</div><input type="file" id="esc-file" accept="image/*" onchange="onEscaneoPick(event)"></label>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>`);
+}
+
+async function onEscaneoPick(e){
+  const file=e.target.files&&e.target.files[0];
+  e.target.value='';
+  if(!file)return;
+  let img;
+  try{img=await comprimirImagen(file)}catch(err){return toast(err.message,'error')}
+
+  openModal(`<h2>📷 Leyendo la factura...</h2>
+    <div style="display:flex;gap:16px;align-items:flex-start;margin-top:12px">
+      <img src="${img.dataUrl}" style="width:150px;border-radius:12px;border:1px solid var(--card-border)">
+      <div style="flex:1">
+        <div style="color:var(--cyan);font-weight:600;margin-bottom:6px">Analizando la imagen</div>
+        <div style="color:var(--muted);font-size:.86rem">Identificando cada gasto y clasificándolo en tus categorías. Suele tardar entre 10 y 30 segundos.</div>
+      </div>
+    </div>`);
+
+  try{
+    const r=await llamarClaude({
+      model:MODELO_VISION,
+      max_tokens:8000,
+      system:SISTEMA_FACTURA,
+      output_config:{format:{type:'json_schema',schema:esquemaFactura()}},
+      messages:[{role:'user',content:[
+        {type:'image',source:{type:'base64',media_type:img.mediaType,data:img.base64}},
+        {type:'text',text:`Extrae los gastos de esta imagen. Hoy es ${today()}. Si el documento no trae fecha, usa la de hoy.`}
+      ]}]
+    });
+    let res;
+    try{res=JSON.parse(r.text)}catch(_){throw new Error('La IA no devolvió un JSON legible')}
+    _escaneo={imagen:img,resultado:res,usage:r.usage};
+    renderRevisionEscaneo();
+  }catch(err){
+    openModal(`<h2>⚠️ No se pudo leer</h2>
+      <p style="color:var(--red);margin:12px 0">${err.message}</p>
+      <p style="color:var(--muted);font-size:.86rem">Puedes intentar con una foto más nítida, o registrar el gasto a mano.</p>
+      <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button><button class="btn btn-primary" onclick="formEscaneo()">Reintentar</button></div>`);
+  }
+}
+
+function renderRevisionEscaneo(){
+  const {imagen,resultado:R}=_escaneo;
+  const items=R.items||[];
+  const fechaDoc=/^\d{4}-\d{2}-\d{2}$/.test(R.fecha)?R.fecha:today();
+  const colorConf={alta:'green',media:'orange',baja:'red'}[R.confianza]||'orange';
+
+  if(!items.length){
+    return openModal(`<h2>🧾 Sin gastos detectados</h2>
+      <p style="color:var(--muted);margin:12px 0">${R.nota||'No se identificó ningún gasto en la imagen.'}</p>
+      <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button><button class="btn btn-primary" onclick="formEscaneo()">Probar otra imagen</button></div>`);
+  }
+
+  const filas=items.map((it,i)=>{
+    const f=/^\d{4}-\d{2}-\d{2}$/.test(it.fecha)?it.fecha:fechaDoc;
+    return `<tr>
+      <td><input type="checkbox" class="esc-chk" checked onchange="recalcEscaneo()"></td>
+      <td><input class="icone-input esc-desc" value="${(it.descripcion||'').replace(/"/g,'&quot;')}" style="min-width:150px"></td>
+      <td><select class="icone-select esc-cat">${S.catEgreso.map(c=>`<option ${it.categoria===c?'selected':''}>${c}</option>`).join('')}</select></td>
+      <td><select class="icone-select esc-met">${S.metodos.map(x=>`<option ${it.metodo===x?'selected':''}>${x}</option>`).join('')}</select></td>
+      <td><input type="date" class="icone-input esc-fecha" value="${f}"></td>
+      <td><input type="number" step="any" class="icone-input esc-monto" value="${it.monto}" style="max-width:120px;text-align:right" oninput="recalcEscaneo()"></td>
+    </tr>`;
+  }).join('');
+
+  openModal(`<h2>🧾 Revisa lo que encontré</h2>
+    <div style="display:flex;gap:14px;align-items:flex-start;margin:12px 0 16px">
+      <img src="${imagen.dataUrl}" style="width:110px;border-radius:12px;border:1px solid var(--card-border);cursor:zoom-in" onclick="openImg(_escaneo.imagen.dataUrl)">
+      <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+        <div class="field"><label>Comercio</label><input class="icone-input" id="esc-comercio" value="${(R.comercio||'').replace(/"/g,'&quot;')}" placeholder="Nombre del comercio"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:.82rem">
+          <span class="badge purple">${R.tipo_documento||'documento'}</span>
+          <span class="badge ${colorConf}">confianza ${R.confianza||'—'}</span>
+          ${R.total_documento?`<span style="color:var(--muted)">total impreso: ${fmtCOP(R.total_documento)}</span>`:''}
+        </div>
+        ${R.nota?`<div style="color:var(--yellow);font-size:.82rem">⚠️ ${R.nota}</div>`:''}
+      </div>
+    </div>
+    <div class="table-wrap" id="esc-tabla" style="max-height:38vh;overflow:auto">
+      <table><thead><tr><th></th><th>Descripción</th><th>Categoría</th><th>Método</th><th>Fecha</th><th style="text-align:right">Monto</th></tr></thead>
+      <tbody>${filas}</tbody></table>
+    </div>
+    <div id="esc-resumen" style="margin-top:12px;font-size:.88rem"></div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:.86rem;color:var(--muted);cursor:pointer">
+      <input type="checkbox" id="esc-agrupar" onchange="recalcEscaneo()"> Guardar todo como un solo gasto (en vez de uno por línea)
+    </label>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="esc-guardar" onclick="guardarEscaneo()">Guardar</button>
+    </div>`);
+  recalcEscaneo();
+}
+
+function recalcEscaneo(){
+  const tabla=document.getElementById('esc-tabla');if(!tabla)return;
+  const filas=[...tabla.querySelectorAll('tbody tr')];
+  const sel=filas.filter(tr=>tr.querySelector('.esc-chk').checked);
+  const suma=sel.reduce((a,tr)=>a+(parseFloat(tr.querySelector('.esc-monto').value)||0),0);
+  const agrupar=document.getElementById('esc-agrupar').checked;
+  const total=_escaneo?.resultado?.total_documento||0;
+  const desfase=total?Math.abs(suma-total):0;
+  document.getElementById('esc-resumen').innerHTML=
+    `<b>${sel.length}</b> de ${filas.length} seleccionados · suma <b class="amount neg">${fmtCOP(suma)}</b>`+
+    (total&&desfase>1?` · <span style="color:var(--yellow)">no cuadra con el total impreso (${fmtCOP(total)}), diferencia ${fmtCOP(desfase)}</span>`:
+      total?` · <span style="color:var(--green)">cuadra con el total impreso ✓</span>`:'');
+  const btn=document.getElementById('esc-guardar');
+  btn.textContent=sel.length?(agrupar?'Guardar 1 gasto':`Guardar ${sel.length} gasto${sel.length>1?'s':''}`):'Guardar';
+  btn.disabled=!sel.length;
+}
+
+async function guardarEscaneo(){
+  const tabla=document.getElementById('esc-tabla');if(!tabla||!_escaneo)return;
+  const sel=[...tabla.querySelectorAll('tbody tr')].filter(tr=>tr.querySelector('.esc-chk').checked);
+  const datos=sel.map(tr=>({
+    descripcion:tr.querySelector('.esc-desc').value.trim(),
+    categoria:tr.querySelector('.esc-cat').value,
+    metodo:tr.querySelector('.esc-met').value,
+    fecha:tr.querySelector('.esc-fecha').value||today(),
+    monto:parseFloat(tr.querySelector('.esc-monto').value)||0
+  })).filter(d=>d.monto>0);
+  if(!datos.length)return toast('No hay montos válidos para guardar','error');
+
+  // La foto queda como recibo, ligada a cada gasto que salió de ella.
+  const rec={id:uid(),data:_escaneo.imagen.dataUrl,name:'escaneo-'+today()+'.jpg',size:_escaneo.imagen.dataUrl.length,createdAt:new Date().toISOString()};
+  await dbPut(rec);
+
+  const comercio=(document.getElementById('esc-comercio').value||'').trim();
+  const pre=comercio?comercio+' · ':'';
+  if(document.getElementById('esc-agrupar').checked){
+    S.egresos.push({id:uid(),fecha:datos[0].fecha,monto:datos.reduce((a,b)=>a+b.monto,0),
+      categoria:datos[0].categoria,metodo:datos[0].metodo,
+      nota:(pre+datos.map(d=>d.descripcion).join(', ')).slice(0,300),recibos:[rec.id]});
+  }else{
+    datos.forEach(d=>S.egresos.push({id:uid(),fecha:d.fecha,monto:d.monto,categoria:d.categoria,
+      metodo:d.metodo,nota:pre+d.descripcion,recibos:[rec.id]}));
+  }
+  const n=document.getElementById('esc-agrupar').checked?1:datos.length;
+  _escaneo=null;
+  saveState();closeModal();rerender();
+  toast(`✓ ${n} gasto${n>1?'s':''} guardado${n>1?'s':''} desde la factura`);
 }
 
 /* ===================================================
