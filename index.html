@@ -262,7 +262,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.12</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.13</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
@@ -990,8 +990,10 @@ async function llamarClaude(payload){
   return j;
 }
 
-/* Reduce la foto antes de subirla: menos datos, menos costo, misma lectura. */
-function comprimirImagen(file,maxLado=1600,calidad=0.85){
+/* Reduce la foto antes de subirla: menos datos, menos costo, menos espera.
+   1400 px deja intactos los pantallazos del celular (que vienen a ~1100-1300)
+   y solo baja las fotos de cámara, donde ese detalle extra no aporta nada. */
+function comprimirImagen(file,maxLado=1400,calidad=0.85){
   return new Promise((res,rej)=>{
     const fr=new FileReader();
     fr.onerror=()=>rej(new Error('No se pudo leer el archivo'));
@@ -1064,6 +1066,48 @@ function formEscaneo(){
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>`);
 }
 
+/* Una pasada de lectura. `esfuerzo` controla cuánto razona Claude antes de
+   responder: es la palanca que más mueve el tiempo de respuesta. */
+async function extraerGastos(img,esfuerzo){
+  const r=await llamarClaude({
+    model:MODELO_VISION,
+    max_tokens:8000,
+    system:SISTEMA_FACTURA,
+    output_config:{effort:esfuerzo,format:{type:'json_schema',schema:esquemaFactura()}},
+    messages:[{role:'user',content:[
+      {type:'image',source:{type:'base64',media_type:img.mediaType,data:img.base64}},
+      {type:'text',text:`Extrae los gastos de esta imagen. Hoy es ${today()}. Si el documento no trae fecha, usa la de hoy.`}
+    ]}]
+  });
+  let res;
+  try{res=JSON.parse(r.text)}catch(_){throw new Error('La IA no devolvió un JSON legible')}
+  return {res,usage:r.usage};
+}
+
+/* Cronómetro en vivo: en vez de prometerte un rango, te muestra el real. */
+let _cronoEsc=null;
+function pintarCargando(img,detalle){
+  openModal(`<h2>📷 Leyendo la factura...</h2>
+    <div style="display:flex;gap:16px;align-items:flex-start;margin-top:12px">
+      <img src="${img.dataUrl}" style="width:150px;border-radius:12px;border:1px solid var(--card-border)">
+      <div style="flex:1">
+        <div style="color:var(--cyan);font-weight:600;margin-bottom:6px">${detalle}</div>
+        <div style="color:var(--muted);font-size:.86rem">Identificando cada gasto y clasificándolo en tus categorías.</div>
+        <div style="margin-top:10px;font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums" id="esc-crono">0.0 s</div>
+      </div>
+    </div>`);
+}
+function arrancarCrono(){
+  const t0=performance.now();
+  clearInterval(_cronoEsc);
+  _cronoEsc=setInterval(()=>{
+    const el=document.getElementById('esc-crono');
+    if(!el)return clearInterval(_cronoEsc);
+    el.textContent=((performance.now()-t0)/1000).toFixed(1)+' s';
+  },100);
+  return t0;
+}
+
 async function onEscaneoPick(e){
   const file=e.target.files&&e.target.files[0];
   e.target.value='';
@@ -1071,31 +1115,31 @@ async function onEscaneoPick(e){
   let img;
   try{img=await comprimirImagen(file)}catch(err){return toast(err.message,'error')}
 
-  openModal(`<h2>📷 Leyendo la factura...</h2>
-    <div style="display:flex;gap:16px;align-items:flex-start;margin-top:12px">
-      <img src="${img.dataUrl}" style="width:150px;border-radius:12px;border:1px solid var(--card-border)">
-      <div style="flex:1">
-        <div style="color:var(--cyan);font-weight:600;margin-bottom:6px">Analizando la imagen</div>
-        <div style="color:var(--muted);font-size:.86rem">Identificando cada gasto y clasificándolo en tus categorías. Suele tardar entre 10 y 30 segundos.</div>
-      </div>
-    </div>`);
+  pintarCargando(img,'Analizando la imagen');
+  const t0=arrancarCrono();
 
   try{
-    const r=await llamarClaude({
-      model:MODELO_VISION,
-      max_tokens:8000,
-      system:SISTEMA_FACTURA,
-      output_config:{format:{type:'json_schema',schema:esquemaFactura()}},
-      messages:[{role:'user',content:[
-        {type:'image',source:{type:'base64',media_type:img.mediaType,data:img.base64}},
-        {type:'text',text:`Extrae los gastos de esta imagen. Hoy es ${today()}. Si el documento no trae fecha, usa la de hoy.`}
-      ]}]
-    });
-    let res;
-    try{res=JSON.parse(r.text)}catch(_){throw new Error('La IA no devolvió un JSON legible')}
-    _escaneo={imagen:img,resultado:res,usage:r.usage};
+    // 1ª pasada rápida. Para leer cifras de una factura no hace falta
+    // razonamiento profundo, y así la espera baja mucho.
+    let {res,usage}=await extraerGastos(img,'low');
+    let esfuerzoUsado='rápido';
+
+    // Red de seguridad: si quedó dudando o no encontró nada, repite
+    // con el máximo de detalle. La precisión manda sobre la velocidad.
+    if(res.confianza==='baja'||!(res.items||[]).length){
+      pintarCargando(img,'Imagen difícil — revisando con más detalle');
+      arrancarCrono();
+      try{
+        const seg=await extraerGastos(img,'high');
+        if((seg.res.items||[]).length>=(res.items||[]).length){res=seg.res;usage=seg.usage;esfuerzoUsado='detallado'}
+      }catch(_){/* si la 2ª falla, nos quedamos con la 1ª */}
+    }
+
+    clearInterval(_cronoEsc);
+    _escaneo={imagen:img,resultado:res,usage,segundos:(performance.now()-t0)/1000,esfuerzo:esfuerzoUsado};
     renderRevisionEscaneo();
   }catch(err){
+    clearInterval(_cronoEsc);
     openModal(`<h2>⚠️ No se pudo leer</h2>
       <p style="color:var(--red);margin:12px 0">${err.message}</p>
       <p style="color:var(--muted);font-size:.86rem">Puedes intentar con una foto más nítida, o registrar el gasto a mano.</p>
@@ -1135,6 +1179,7 @@ function renderRevisionEscaneo(){
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:.82rem">
           <span class="badge purple">${R.tipo_documento||'documento'}</span>
           <span class="badge ${colorConf}">confianza ${R.confianza||'—'}</span>
+          ${_escaneo.segundos?`<span class="badge">⚡ ${_escaneo.segundos.toFixed(1)} s · ${_escaneo.esfuerzo}</span>`:''}
           ${R.total_documento?`<span style="color:var(--muted)">total impreso: ${fmtCOP(R.total_documento)}</span>`:''}
         </div>
         ${R.nota?`<div style="color:var(--yellow);font-size:.82rem">⚠️ ${R.nota}</div>`:''}
