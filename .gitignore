@@ -6,3 +6,6 @@
 *backup*.json
 *respaldo*.json
 finanzas-*.json
+
+# Copias de seguridad de las imagenes antes de reprocesarlas
+img/anterior/

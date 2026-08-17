@@ -31,7 +31,7 @@ body::before{content:"";position:fixed;inset:0;background:radial-gradient(ellips
    así el oscurecimiento viaja siempre con la imagen y el texto encima
    conserva contraste pase lo que pase. */
 body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-  background-image:linear-gradient(rgba(5,13,31,.84),rgba(5,13,31,.95)),var(--fondo-seccion,none);
+  background-image:linear-gradient(rgba(5,13,31,.58),rgba(5,13,31,.74)),var(--fondo-seccion,none);
   background-size:cover;background-position:center;background-repeat:no-repeat;
   transition:background-image .4s ease}
 @media (prefers-reduced-motion:reduce){body::after{transition:none}}
@@ -269,7 +269,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.20</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.21</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
@@ -2154,6 +2154,9 @@ registerModule({
   async afterRender(){
     const all=await dbAll();
     const host=document.getElementById('gallery-host');
+    // Leer de IndexedDB toma su tiempo. Si cambiaste de sección mientras
+    // tanto, este contenedor ya no existe: salir en vez de reventar.
+    if(!host)return;
     if(!all.length){host.innerHTML='<div class="empty"><div class="empty-icon">🧾</div>Aún no hay recibos. Súbelos al registrar ingresos o egresos.</div>';return}
     // mapear recibo → movimiento
     const idx={};
