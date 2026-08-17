@@ -262,7 +262,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.17</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.18</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
@@ -1778,7 +1778,7 @@ function recalcVoz(){
 }
 function guardarVoz(){
   const sel=[...document.querySelectorAll('#vz-tabla tbody tr')].filter(tr=>tr.querySelector('.vz-chk').checked);
-  let n=0;
+  let nIng=0,nEg=0;
   sel.forEach(tr=>{
     const monto=parseFloat(tr.querySelector('.vz-monto').value)||0;
     if(monto<=0)return;
@@ -1786,17 +1786,28 @@ function guardarVoz(){
       categoria:tr.querySelector('.vz-cat').value,
       nota:tr.querySelector('.vz-desc').value.trim(),recibos:[]};
     if(tr.dataset.tipo==='ing'){
-      S.ingresos.push({...base,fuente:''});
+      S.ingresos.push({...base,fuente:''});nIng++;
     }else{
       const sub=valorSubcat(tr.querySelector('.sub-wrap'));
       S.egresos.push({...base,subcategoria:sub,metodo:S.metodos[0]});
-      aprenderSubcategoria(base.categoria,sub);
+      aprenderSubcategoria(base.categoria,sub);nEg++;
     }
-    n++;
   });
+  const n=nIng+nEg;
   if(!n)return toast('No hay montos válidos','error');
-  saveState();closeModal();rerender();
-  toast(`✓ ${n} movimiento${n>1?'s':''} guardado${n>1?'s':''} por voz`);
+  saveState();closeModal();
+
+  // Puedes dictar un egreso estando en Ingresos (y al revés). Antes se
+  // guardaba bien pero la app te dejaba mirando la lista equivocada, y
+  // parecía que no había pasado nada. Ahora te lleva a donde quedó.
+  if(nEg&&!nIng)go('egresos');
+  else if(nIng&&!nEg)go('ingresos');
+  else rerender();
+
+  const partes=[];
+  if(nIng)partes.push(`${nIng} ingreso${nIng>1?'s':''}`);
+  if(nEg)partes.push(`${nEg} egreso${nEg>1?'s':''}`);
+  toast(`✓ Guardé ${partes.join(' y ')}`);
 }
 
 /* ═══════════════════════════════════════════════════════════
