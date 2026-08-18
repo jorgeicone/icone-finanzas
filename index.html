@@ -52,6 +52,11 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
    lo que se lee tanto aquí a 44px como en la pestaña a 16px. */
 .brand-logo{width:44px;height:44px;border-radius:10px;display:block;flex-shrink:0;
   box-shadow:0 8px 24px -8px rgba(0,212,255,.5),0 4px 12px rgba(123,47,255,.28)}
+/* Desglose foto -> proyectado en la tarjeta de cada cuenta */
+.proy-box{background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.18);border-radius:12px;padding:10px 12px;margin-bottom:12px;display:flex;flex-direction:column;gap:5px}
+.proy-box>div{display:flex;justify-content:space-between;font-size:.8rem;gap:8px}
+.proy-box .k{color:rgba(255,255,255,.62);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cuenta-hint{font-size:.75rem;color:var(--muted);margin-top:6px;line-height:1.4}
 .brand-name{font-weight:800;font-size:1.05rem;line-height:1.1}
 .brand-name small{display:block;font-size:.65rem;color:var(--muted);font-weight:500;letter-spacing:1px;text-transform:uppercase;margin-top:2px}
 .nav-section{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;padding:14px 12px 6px}
@@ -273,7 +278,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.24</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.25</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
@@ -707,6 +712,10 @@ registerModule({
   render(){
     const mk=monthKey();
     const totalSaldo=getSaldoConsolidado();
+    const totalProy=getSaldoProyectadoConsolidado();
+    /* Si nada se movio desde los cortes, las dos cifras son la misma y no
+       tiene sentido mostrar las dos. */
+    const hayProy=Math.round(totalProy)!==Math.round(totalSaldo);
     const ingMes=S.ingresos.filter(x=>monthKey(x.fecha)===mk).reduce((a,b)=>a+b.monto,0);
     const egMes=S.egresos.filter(x=>monthKey(x.fecha)===mk).reduce((a,b)=>a+b.monto,0);
     const flujo=ingMes-egMes;
@@ -719,7 +728,7 @@ registerModule({
 
     return `
       <div class="kpi-grid">
-        <div class="kpi"><div class="kpi-label">Saldo total</div><div class="kpi-value">${fmtCOP(totalSaldo)}</div><div class="kpi-meta">${S.cuentas.length} cuenta(s)</div></div>
+        <div class="kpi"><div class="kpi-label">Saldo total</div><div class="kpi-value">${fmtCOP(hayProy?totalProy:totalSaldo)}</div><div class="kpi-meta">${hayProy?`Proyectado · cortes ${fmtCOP(totalSaldo)}`:`${S.cuentas.length} cuenta(s)`}</div></div>
         <div class="kpi green"><div class="kpi-label">Ingresos del mes</div><div class="kpi-value">${fmtCOP(ingMes)}</div><div class="kpi-meta">${pctDelta(ingMes,ingPrev)}</div></div>
         <div class="kpi red"><div class="kpi-label">Egresos del mes</div><div class="kpi-value">${fmtCOP(egMes)}</div><div class="kpi-meta">${pctDelta(egMes,egPrev,true)}</div></div>
         <div class="kpi orange"><div class="kpi-label">Flujo neto</div><div class="kpi-value" style="color:${flujo>=0?'var(--green)':'var(--red)'}">${fmtCOP(flujo)}</div><div class="kpi-meta">${flujo>=0?'Superávit':'Déficit'} del mes</div></div>
@@ -777,6 +786,67 @@ function getUltimoSaldo(cuentaId,maxFecha){
 }
 function getSaldoConsolidado(){
   return S.cuentas.reduce((acc,c)=>{const u=getUltimoSaldo(c.id);return acc+(u?u.monto:0)},0);
+}
+
+/* ── Saldo proyectado ───────────────────────────────────────────────
+   Hay dos cifras por cuenta y las dos importan:
+
+   FOTO       S.saldos, lo que el banco decía el día del corte. Es el
+              dato verificado y no se toca nunca.
+   PROYECTADO foto + los movimientos que registraste después.
+
+   No se pisa la foto con el cálculo a propósito. Si se pisara, un solo
+   movimiento olvidado dejaría el saldo mal para siempre y sin avisar.
+   Manteniendo las dos, la diferencia entre ellas ES la información:
+   es exactamente lo que gastaste sin registrar.
+
+   Los movimientos del MISMO día del corte no se suman: se asume que la
+   foto ya los refleja. Si se sumaran, un corte tomado por la noche
+   contaría dos veces lo que gastaste esa mañana. */
+const nombreCuenta=id=>{const c=S.cuentas.find(x=>x.id===id);return c?(c.alias||c.banco):''};
+
+/* Selector de cuenta para lotes (escaneo y dictado). Una factura se paga
+   de una sola cuenta, asi que no tiene sentido preguntarlo linea por
+   linea como si fuera el metodo de pago. */
+function selectCuentaLote(id,label){
+  if(!S.cuentas.length)return '';
+  return `<div class="field" style="margin-top:14px"><label>${label}</label>
+    <select class="icone-select" id="${id}">
+      <option value="">— Sin especificar —</option>
+      ${S.cuentas.map(c=>`<option value="${c.id}" ${S.config.ultimaCuentaEg===c.id?'selected':''}>${c.alias||c.banco}</option>`).join('')}
+    </select></div>`;
+}
+function valorCuentaLote(id){
+  const el=document.getElementById(id);
+  const v=el?el.value:'';
+  if(v)S.config.ultimaCuentaEg=v;
+  return v||'';
+}
+
+function movsDeCuenta(cuentaId,desdeExclusive){
+  const filtro=m=>m.cuentaId===cuentaId&&(!desdeExclusive||m.fecha>desdeExclusive);
+  const ing=S.ingresos.filter(filtro),eg=S.egresos.filter(filtro);
+  const totalIng=ing.reduce((a,b)=>a+(+b.monto||0),0);
+  const totalEg =eg .reduce((a,b)=>a+(+b.monto||0),0);
+  return {ing,eg,totalIng,totalEg,delta:totalIng-totalEg,n:ing.length+eg.length};
+}
+
+function getSaldoProyectado(cuentaId){
+  const ult=getUltimoSaldo(cuentaId);
+  const mv=movsDeCuenta(cuentaId,ult?ult.fecha:null);
+  const base=ult?ult.monto:0;
+  return {...mv,base,fechaBase:ult?ult.fecha:null,tieneFoto:!!ult,proyectado:base+mv.delta};
+}
+
+function getSaldoProyectadoConsolidado(){
+  return S.cuentas.reduce((a,c)=>a+getSaldoProyectado(c.id).proyectado,0);
+}
+
+/* Movimientos sin cuenta asignada: no entran en ninguna proyección.
+   Los 218 del histórico viven aquí y es correcto que así sea. */
+function movsSinCuenta(){
+  const f=m=>!m.cuentaId;
+  return S.ingresos.filter(f).length+S.egresos.filter(f).length;
 }
 
 let charts={};
@@ -1025,6 +1095,7 @@ registerModule({
       <div class="grid-3" style="margin-bottom:18px">
         ${S.cuentas.map(c=>{
           const ult=getUltimoSaldo(c.id);
+          const p=getSaldoProyectado(c.id);
           const nregs=S.saldos.filter(s=>s.cuentaId===c.id).length;
           const bols=ult&&ult.bolsillos?ult.bolsillos.filter(b=>b.m>0):[];
           return `<div class="card" style="border-left:4px solid ${c.color||'#00d4ff'};display:flex;flex-direction:column">
@@ -1032,8 +1103,13 @@ registerModule({
               <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:1.05rem">${c.alias||c.banco}</div><div style="color:var(--muted);font-size:.78rem">${c.tipo}</div></div>
               <div style="display:flex;gap:6px"><button class="btn btn-icon btn-sm btn-ghost" onclick="formCuenta('${c.id}')" title="Editar">✎</button><button class="btn btn-icon btn-sm btn-ghost" onclick="delCuenta('${c.id}')" title="Eliminar">🗑</button></div>
             </div>
-            <div style="font-size:1.7rem;font-weight:700;margin:14px 0 4px;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${ult?fmtCOP(ult.monto):'<span style="color:var(--muted);font-size:1rem;font-weight:500">Sin registros</span>'}</div>
-            <div style="color:var(--muted);font-size:.75rem;margin-bottom:12px">${ult?fmtDate(ult.fecha):'—'} · ${nregs} registro(s)</div>
+            <div style="font-size:1.7rem;font-weight:700;margin:14px 0 4px;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${ult?fmtCOP(p.proyectado):'<span style="color:var(--muted);font-size:1rem;font-weight:500">Sin registros</span>'}</div>
+            <div style="color:var(--muted);font-size:.75rem;margin-bottom:12px">${ult?(p.n?`Proyectado · ${nregs} corte(s)`:`${fmtDate(ult.fecha)} · ${nregs} corte(s)`):'—'}</div>
+            ${p.n?`<div class="proy-box">
+              <div><span class="k">Corte ${fmtDate(p.fechaBase)}</span><span class="amount">${fmtCOP(p.base)}</span></div>
+              ${p.totalIng?`<div><span class="k">${p.ing.length} ingreso(s) después</span><span class="amount pos">+${fmtCOP(p.totalIng)}</span></div>`:''}
+              ${p.totalEg?`<div><span class="k">${p.eg.length} egreso(s) después</span><span class="amount neg">−${fmtCOP(p.totalEg)}</span></div>`:''}
+            </div>`:''}
             ${bols.length?`<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:10px 12px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px">
               ${bols.map(b=>`<div style="display:flex;justify-content:space-between;font-size:.82rem;gap:8px"><span style="color:rgba(255,255,255,.7);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.n}</span><span class="amount" style="color:#fff">${fmtCOP(b.m)}</span></div>`).join('')}
             </div>`:''}
@@ -1069,9 +1145,19 @@ function saveCuenta(id){
   saveState();closeModal();rerender();toast('Cuenta guardada');
 }
 function delCuenta(id){
-  if(!confirm('¿Eliminar cuenta y todos sus saldos?'))return;
+  /* Los movimientos NO se borran: el gasto ocurrió aunque la cuenta ya no
+     exista. Pero hay que soltarles la cuenta, porque si quedan apuntando
+     a un id muerto pasa lo peor de los dos mundos: dejan de sumar en
+     cualquier proyección y aun así se ven como "ya asignados". */
+  const huerfanos=[...S.ingresos,...S.egresos].filter(m=>m.cuentaId===id).length;
+  const cortes=S.saldos.filter(x=>x.cuentaId===id).length;
+  if(!confirm(`¿Eliminar la cuenta y sus ${cortes} corte(s)?`+(huerfanos?`\n\n${huerfanos} movimiento(s) quedarán sin cuenta asignada. No se borran.`:'')))return;
   S.cuentas=S.cuentas.filter(x=>x.id!==id);
   S.saldos=S.saldos.filter(x=>x.cuentaId!==id);
+  S.ingresos.forEach(m=>{if(m.cuentaId===id)m.cuentaId=''});
+  S.egresos .forEach(m=>{if(m.cuentaId===id)m.cuentaId=''});
+  if(S.config.ultimaCuentaIng===id)S.config.ultimaCuentaIng='';
+  if(S.config.ultimaCuentaEg ===id)S.config.ultimaCuentaEg ='';
   saveState();rerender();toast('Cuenta eliminada');
 }
 function formSaldo(preselectId){
@@ -1140,6 +1226,9 @@ function saveSaldo(){
     const cuentaId=document.getElementById('f-cuenta').value;
     const fecha=document.getElementById('f-fecha').value;
     const nuevo={id:uid(),cuentaId,fecha,monto:total,bolsillos,nota:document.getElementById('f-nota').value.trim(),createdAt:new Date().toISOString()};
+    /* Hay que capturar la proyección ANTES de guardar el corte nuevo:
+       después ya no existe, porque el corte nuevo pasa a ser la base. */
+    const prev=getSaldoProyectado(cuentaId);
     S.saldos.push(nuevo);
     saveState();
     // Verificar que realmente se guardó en localStorage
@@ -1149,11 +1238,50 @@ function saveSaldo(){
     closeModal();rerender();
     const cuenta=S.cuentas.find(c=>c.id===cuentaId);
     toast('✓ '+(cuenta.alias||cuenta.banco)+': '+fmtCOP(total));
+    conciliar(prev,nuevo,cuenta);
   }catch(err){
     console.error('Error guardando saldo:',err);
     toast('❌ Error: '+err.message,'error');
   }
 }
+/* Cuadre: compara lo que registraste desde el corte anterior contra lo
+   que el banco dice hoy. La diferencia no es un error del cálculo, es
+   plata que se movió sin que la anotaras — y verla es todo el punto de
+   guardar la foto y la proyección por separado.
+
+   Solo interrumpe si de verdad hay algo que decir: tiene que haber un
+   corte anterior, movimientos en medio, el corte nuevo debe ser
+   posterior (si estás corrigiendo una fecha vieja no aplica) y la
+   diferencia debe superar el ruido de redondeo. */
+function conciliar(prev,nuevo,cuenta){
+  if(!prev.tieneFoto||!prev.n||nuevo.fecha<=prev.fechaBase)return false;
+  const gap=nuevo.monto-prev.proyectado;
+  if(Math.abs(gap)<1000)return false;
+  const falta=gap<0;
+  openModal(`<h2>${falta?'⚠️':'ℹ️'} Cuadre de ${cuenta.alias||cuenta.banco}</h2>
+    <p style="color:var(--muted);font-size:.9rem;line-height:1.6;margin-bottom:14px">
+      Comparé lo que registraste desde el corte del ${fmtDate(prev.fechaBase)} contra lo que acabas de leer en el banco.
+    </p>
+    <div class="proy-box" style="margin-bottom:14px">
+      <div><span class="k">Corte anterior</span><span class="amount">${fmtCOP(prev.base)}</span></div>
+      ${prev.totalIng?`<div><span class="k">Ingresos que registraste</span><span class="amount pos">+${fmtCOP(prev.totalIng)}</span></div>`:''}
+      ${prev.totalEg?`<div><span class="k">Egresos que registraste</span><span class="amount neg">−${fmtCOP(prev.totalEg)}</span></div>`:''}
+      <div style="border-top:1px solid rgba(255,255,255,.14);padding-top:7px;margin-top:2px"><span class="k">Deberías tener</span><span class="amount">${fmtCOP(prev.proyectado)}</span></div>
+      <div><span class="k">El banco dice</span><span class="amount">${fmtCOP(nuevo.monto)}</span></div>
+    </div>
+    <div style="background:${falta?'rgba(255,71,87,.10)':'rgba(0,212,138,.10)'};border:1px solid ${falta?'rgba(255,71,87,.30)':'rgba(0,212,138,.30)'};border-radius:12px;padding:14px 16px">
+      <div style="font-size:1.4rem;font-weight:700;color:${falta?'var(--red)':'var(--green)'};font-variant-numeric:tabular-nums">${falta?'−':'+'}${fmtCOP(Math.abs(gap))}</div>
+      <div style="font-size:.85rem;color:rgba(255,255,255,.75);margin-top:5px;line-height:1.5">
+        ${falta
+          ?'Salió más plata de la que registraste. Suele ser compras pequeñas sin anotar, cuotas de manejo, o traslados a otra de tus cuentas.'
+          :'Entró más plata de la que registraste, o algún egreso quedó anotado de más.'}
+      </div>
+    </div>
+    <p style="color:var(--muted);font-size:.78rem;margin-top:12px;line-height:1.5">El corte que acabas de guardar queda como dato verificado. La proyección arranca de nuevo desde él, así que esta diferencia no se arrastra.</p>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn btn-primary" onclick="closeModal()">Entendido</button></div>`);
+  return true;
+}
+
 function delSaldo(id){if(!confirm('¿Eliminar este registro?'))return;S.saldos=S.saldos.filter(x=>x.id!==id);saveState();rerender();toast('Eliminado')}
 
 /* ===================================================
@@ -1193,7 +1321,7 @@ function renderMovList(tipo){
     </div>
     <div class="card" style="margin-top:18px"><h3>📋 Movimientos</h3>
       ${arr.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Categoría</th><th>${tipo==='ing'?'Fuente':'Método'}</th><th>Nota</th><th>Recibos</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
-        ${[...arr].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${m.categoria}</span>${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${m.subcategoria}</div>`:''}</td><td>${tipo==='ing'?(m.fuente||'—'):(m.metodo||'—')}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.nota||'—'}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')">🗑</button></td></tr>`).join('')}
+        ${[...arr].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${m.categoria}</span>${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${m.subcategoria}</div>`:''}</td><td>${tipo==='ing'?(m.fuente||'—'):(m.metodo||'—')}${m.cuentaId&&nombreCuenta(m.cuentaId)?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">🏦 ${nombreCuenta(m.cuentaId)}</div>`:''}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.nota||'—'}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')">🗑</button></td></tr>`).join('')}
       </tbody></table></div>`:`<div class="empty"><div class="empty-icon">${tipo==='ing'?'💵':'💸'}</div>No hay ${tipo==='ing'?'ingresos':'egresos'} registrados</div>`}
     </div>
   `;
@@ -1249,10 +1377,38 @@ function pintarBarrasCategoria(tipo){
 
 let _pendingRecibos=[]; // recibos a guardar al confirmar formulario
 
+/* Selector de cuenta para movimientos.
+
+   Va tanto en ingresos como en egresos: si solo lo llevaran los egresos
+   el saldo proyectado únicamente podría bajar, que es peor que no tenerlo.
+
+   Es distinto de "Método de pago", que se queda. "Pagué con débito" y
+   "salió de Bancolombia" son dos datos, no uno. */
+function campoCuenta(sel,tipo){
+  if(!S.cuentas.length)return '';
+  return `<div class="field" style="margin-top:12px">
+    <label>${tipo==='ing'?'¿A qué cuenta entró?':'¿De qué cuenta salió?'}</label>
+    <select class="icone-select" id="f-cuenta-mov" onchange="hintCuenta(this.value)">
+      <option value="">— Sin especificar —</option>
+      ${S.cuentas.map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${c.alias||c.banco}</option>`).join('')}
+    </select>
+    <div id="f-cuenta-hint" class="cuenta-hint"></div>
+  </div>`;
+}
+function hintCuenta(cid){
+  const el=document.getElementById('f-cuenta-hint');if(!el)return;
+  if(!cid){el.innerHTML='Sin cuenta, este movimiento no entra en la proyección de saldos.';return}
+  const p=getSaldoProyectado(cid);
+  el.innerHTML=p.tieneFoto
+    ?`Proyectado ahora: <b style="color:#fff">${fmtCOP(p.proyectado)}</b> · último corte ${fmtDate(p.fechaBase)}`
+    :'Esta cuenta todavía no tiene ningún corte registrado, así que no hay base para proyectar.';
+}
+
 function formMov(tipo,id){
   const arr=tipo==='ing'?S.ingresos:S.egresos;
   const cats=tipo==='ing'?S.catIngreso:S.catEgreso;
-  const m=id?arr.find(x=>x.id===id):{fecha:today(),monto:'',categoria:cats[0],fuente:'',metodo:S.metodos[0],nota:'',recibos:[]};
+  const ultima=(tipo==='ing'?S.config.ultimaCuentaIng:S.config.ultimaCuentaEg)||'';
+  const m=id?arr.find(x=>x.id===id):{fecha:today(),monto:'',categoria:cats[0],fuente:'',metodo:S.metodos[0],cuentaId:ultima,nota:'',recibos:[]};
   _pendingRecibos=[];
   openModal(`<h2>${id?'Editar':'Nuevo'} ${tipo==='ing'?'ingreso':'egreso'}</h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
@@ -1262,6 +1418,7 @@ function formMov(tipo,id){
       ${tipo==='ing'?`<div class="field"><label>Fuente</label><input class="icone-input" id="f-fuente" value="${m.fuente||''}" placeholder="Empresa, cliente..."></div>`:`<div class="field"><label>Método de pago</label><select class="icone-select" id="f-metodo">${S.metodos.map(x=>`<option ${m.metodo===x?'selected':''}>${x}</option>`).join('')}</select></div>`}
     </div>
     ${tipo==='eg'?`<div class="field" style="margin-top:12px"><label>Subcategoría</label>${campoSubcat(m.categoria,m.subcategoria,'100%')}</div>`:''}
+    ${campoCuenta(m.cuentaId||'',tipo)}
     <div class="field" style="margin-top:12px"><label>Nota</label><textarea class="icone-input" id="f-nota" rows="2" placeholder="Detalle...">${m.nota||''}</textarea></div>
     <div class="field" style="margin-top:14px">
       <label>Recibos / Comprobantes (fotos)</label>
@@ -1269,6 +1426,7 @@ function formMov(tipo,id){
       <div class="preview-strip" id="f-preview"></div>
     </div>
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="saveMov('${tipo}','${id||''}')">Guardar</button></div>`);
+  hintCuenta(m.cuentaId||'');
   // si edita, cargar recibos existentes en preview
   if(id&&m.recibos&&m.recibos.length){renderExistingRecibosInForm(m.recibos)}
 }
@@ -1316,6 +1474,17 @@ async function saveMov(tipo,id){
     data.metodo=document.getElementById('f-metodo').value;
     data.subcategoria=valorSubcat(document.querySelector('#modal-content .sub-wrap'));
     aprenderSubcategoria(data.categoria,data.subcategoria);
+  }
+
+  /* La cuenta se recuerda para el siguiente movimiento del mismo tipo:
+     casi siempre se repite, y obligar a elegirla cada vez hace que uno
+     deje de elegirla. Si la cuenta recordada se borró, el select cae
+     solo en "Sin especificar". */
+  const selCuenta=document.getElementById('f-cuenta-mov');
+  if(selCuenta){
+    data.cuentaId=selCuenta.value||'';
+    if(tipo==='ing')S.config.ultimaCuentaIng=data.cuentaId;
+    else S.config.ultimaCuentaEg=data.cuentaId;
   }
 
   // recibos: guardar nuevos en DB
@@ -1655,6 +1824,7 @@ function renderRevisionEscaneo(){
         <div class="field" style="flex:1;min-width:150px"><label>Subcategoría</label>${campoSubcat('','','150px')}</div>
       </div>
     </div>
+    ${selectCuentaLote('esc-cuenta','¿De qué cuenta salió esta factura?')}
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary" id="esc-guardar" onclick="guardarEscaneo()">Guardar</button>
@@ -1727,19 +1897,20 @@ async function guardarEscaneo(){
   const comercio=(document.getElementById('esc-comercio').value||'').trim();
   const pre=comercio?comercio+' · ':'';
   const agrupar=document.getElementById('esc-agrupar').checked;
+  const cuentaId=valorCuentaLote('esc-cuenta');
   if(agrupar){
     // Un solo gasto = una sola categoría: la que elegiste arriba, no la de la
     // primera fila. Por defecto viene propuesta la que más pesa en la factura.
     const cat=document.getElementById('esc-grupo-cat').value;
     const sub=valorSubcat(document.querySelector('#esc-grupo .sub-wrap'));
     S.egresos.push({id:uid(),fecha:datos[0].fecha,monto:datos.reduce((a,b)=>a+b.monto,0),
-      categoria:cat,subcategoria:sub,metodo:datos[0].metodo,
+      categoria:cat,subcategoria:sub,metodo:datos[0].metodo,cuentaId,
       nota:(pre+datos.map(d=>d.descripcion).join(', ')).slice(0,300),recibos:[rec.id]});
     aprenderSubcategoria(cat,sub);
   }else{
     datos.forEach(d=>{
       S.egresos.push({id:uid(),fecha:d.fecha,monto:d.monto,categoria:d.categoria,
-        subcategoria:d.subcategoria,metodo:d.metodo,nota:pre+d.descripcion,recibos:[rec.id]});
+        subcategoria:d.subcategoria,metodo:d.metodo,cuentaId,nota:pre+d.descripcion,recibos:[rec.id]});
       aprenderSubcategoria(d.categoria,d.subcategoria);
     });
   }
@@ -1992,6 +2163,7 @@ function renderRevisionVoz(R,texto,segs){
       <tbody>${cuerpo}</tbody></table>
     </div>
     <div id="vz-resumen" style="margin-top:12px;font-size:.88rem"></div>
+    ${selectCuentaLote('vz-cuenta','¿Qué cuenta se movió?')}
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary" id="vz-guardar" onclick="guardarVoz()">Guardar</button>
@@ -2039,12 +2211,13 @@ function recalcVoz(){
 function guardarVoz(){
   const sel=[...document.querySelectorAll('#vz-tabla tbody tr')].filter(tr=>tr.querySelector('.vz-chk').checked);
   let nIng=0,nEg=0;
+  const cuentaId=valorCuentaLote('vz-cuenta');
   sel.forEach(tr=>{
     const monto=parseFloat(tr.querySelector('.vz-monto').value)||0;
     if(monto<=0)return;
     const base={id:uid(),fecha:tr.querySelector('.vz-fecha').value||today(),monto,
       categoria:tr.querySelector('.vz-cat').value,
-      nota:tr.querySelector('.vz-desc').value.trim(),recibos:[]};
+      nota:tr.querySelector('.vz-desc').value.trim(),cuentaId,recibos:[]};
     if(tr.dataset.tipo==='ing'){
       S.ingresos.push({...base,fuente:''});nIng++;
     }else{
