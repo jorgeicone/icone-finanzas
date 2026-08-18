@@ -278,7 +278,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.25</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.26</b></div>
       <div style="margin-top:2px">Build 2026-08-17</div>
     </div>
   </aside>
@@ -355,8 +355,15 @@ const COICOP=[
 let S={
   cuentas:[],
   saldos:[],     // {id,cuentaId,fecha,monto,nota}
-  ingresos:[],   // {id,fecha,monto,categoria,fuente,nota,recibos:[]}
-  egresos:[],    // {id,fecha,monto,categoria,metodo,nota,recibos:[]}
+  ingresos:[],   // {id,fecha,monto,categoria,fuente,cuentaId,nota,recibos:[]}
+  egresos:[],    // {id,fecha,monto,categoria,metodo,cuentaId,nota,recibos:[]}
+  /* Traslados entre cuentas propias: {id,fecha,origenId,destinoId,monto,nota}
+     Van aparte de ingresos y egresos a propósito. Mueven saldos pero no son
+     plata que entra ni que sale de tu patrimonio: pasarlos de Bancolombia a
+     Nequi no te hace ni más rico ni más pobre. Al vivir en su propio arreglo
+     quedan fuera de todas las gráficas de gasto sin tener que filtrarlos en
+     cada una. */
+  traslados:[],
   catIngreso:['Salario','Freelance','Inversiones','Ventas','Reembolso','Otros'],
   catEgreso:[...COICOP.map(c=>c.nombre)],
   subcatEgreso:{},   // { "Categoría": ["subcategoría aprendida", ...] }
@@ -366,6 +373,20 @@ let S={
 };
 let modulesCustom=[]; // módulos extra creados por usuario
 
+/* Los estados guardados antes de una versión no traen los campos nuevos:
+   el tuyo, sin ir más lejos, no tiene 'traslados'. El spread de loadState
+   los conserva del valor por defecto, pero eso solo funciona mientras S
+   nunca se reemplace entero. Normalizar aquí lo vuelve cierto pase lo que
+   pase, y cubre de una vez los tres sitios que sobreescriben el estado:
+   carga local, sincronización con la nube y restauración de respaldo. */
+function normalizeState(){
+  ['cuentas','saldos','ingresos','egresos','traslados','catIngreso','catEgreso','metodos'].forEach(k=>{
+    if(!Array.isArray(S[k]))S[k]=[];
+  });
+  if(!S.subcatEgreso||typeof S.subcatEgreso!=='object')S.subcatEgreso={};
+  if(!S.config||typeof S.config!=='object')S.config={moneda:'COP',frecuencia:'mensual',nombre:'Mi finanzas'};
+}
+
 function loadState(){
   try{
     const raw=localStorage.getItem(STORE_KEY);
@@ -373,6 +394,7 @@ function loadState(){
     const m=localStorage.getItem(STORE_KEY+'_modules');
     if(m)modulesCustom=JSON.parse(m);
   }catch(e){console.error(e)}
+  normalizeState();
   migrarTaxonomia();
 }
 
@@ -539,6 +561,7 @@ async function pullFromCloud(forceOverwrite=false){
       }
 
       S={...S,...data.data};
+      normalizeState();
       modulesCustom=data.modules||[];
       migrarTaxonomia();   // los datos de la nube pueden venir con la taxonomía vieja
       localStorage.setItem(STORE_KEY,JSON.stringify(S));
@@ -824,11 +847,19 @@ function valorCuentaLote(id){
 }
 
 function movsDeCuenta(cuentaId,desdeExclusive){
-  const filtro=m=>m.cuentaId===cuentaId&&(!desdeExclusive||m.fecha>desdeExclusive);
+  const enRango=f=>!desdeExclusive||f>desdeExclusive;
+  const filtro=m=>m.cuentaId===cuentaId&&enRango(m.fecha);
   const ing=S.ingresos.filter(filtro),eg=S.egresos.filter(filtro);
-  const totalIng=ing.reduce((a,b)=>a+(+b.monto||0),0);
-  const totalEg =eg .reduce((a,b)=>a+(+b.monto||0),0);
-  return {ing,eg,totalIng,totalEg,delta:totalIng-totalEg,n:ing.length+eg.length};
+  /* El mismo traslado resta en una cuenta y suma en la otra. Por eso se
+     miran los dos extremos por separado: para la cuenta origen es salida,
+     para la destino es entrada. */
+  const tOut=S.traslados.filter(t=>t.origenId ===cuentaId&&enRango(t.fecha));
+  const tIn =S.traslados.filter(t=>t.destinoId===cuentaId&&enRango(t.fecha));
+  const sum=a=>a.reduce((x,y)=>x+(+y.monto||0),0);
+  const totalIng=sum(ing),totalEg=sum(eg),totalIn=sum(tIn),totalOut=sum(tOut);
+  return {ing,eg,tIn,tOut,totalIng,totalEg,totalIn,totalOut,
+    delta:(totalIng+totalIn)-(totalEg+totalOut),
+    n:ing.length+eg.length+tIn.length+tOut.length};
 }
 
 function getSaldoProyectado(cuentaId){
@@ -1088,6 +1119,7 @@ function volverAnillo(){_anillo.categoria=null;pintarAnilloCategorias()}
 registerModule({
   id:'saldos',label:'Saldos bancarios',icon:'🏦',sub:'Registro periódico de saldos por banco',
   actions:`<button class="btn btn-outline btn-sm" onclick="formCuenta()">+ Nueva cuenta</button>
+           <button class="btn btn-outline btn-sm" onclick="formTraslado()">⇄ Traslado</button>
            <button class="btn btn-primary btn-sm" onclick="formSaldo()">+ Registrar saldo</button>`,
   render(){
     if(!S.cuentas.length)return `<div class="card empty"><div class="empty-icon">🏦</div><h3 style="margin-bottom:8px">Agrega tu primera cuenta bancaria</h3><p style="color:var(--muted);margin-bottom:16px">Registra bancos, cuentas de ahorro, billeteras digitales, etc.</p><button class="btn btn-primary" onclick="formCuenta()">+ Crear cuenta</button></div>`;
@@ -1109,6 +1141,8 @@ registerModule({
               <div><span class="k">Corte ${fmtDate(p.fechaBase)}</span><span class="amount">${fmtCOP(p.base)}</span></div>
               ${p.totalIng?`<div><span class="k">${p.ing.length} ingreso(s) después</span><span class="amount pos">+${fmtCOP(p.totalIng)}</span></div>`:''}
               ${p.totalEg?`<div><span class="k">${p.eg.length} egreso(s) después</span><span class="amount neg">−${fmtCOP(p.totalEg)}</span></div>`:''}
+              ${p.totalIn?`<div><span class="k">${p.tIn.length} traslado(s) recibido(s)</span><span class="amount pos">+${fmtCOP(p.totalIn)}</span></div>`:''}
+              ${p.totalOut?`<div><span class="k">${p.tOut.length} traslado(s) enviado(s)</span><span class="amount neg">−${fmtCOP(p.totalOut)}</span></div>`:''}
             </div>`:''}
             ${bols.length?`<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:10px 12px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px">
               ${bols.map(b=>`<div style="display:flex;justify-content:space-between;font-size:.82rem;gap:8px"><span style="color:rgba(255,255,255,.7);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.n}</span><span class="amount" style="color:#fff">${fmtCOP(b.m)}</span></div>`).join('')}
@@ -1121,6 +1155,19 @@ registerModule({
         ${S.saldos.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Cuenta</th><th>Bolsillos</th><th style="text-align:right">Saldo</th><th></th></tr></thead><tbody>
           ${S.saldos.map((s,i)=>({s,i})).sort((a,b)=>{const c=b.s.fecha.localeCompare(a.s.fecha);return c||(b.i-a.i)}).map(({s})=>{const c=S.cuentas.find(x=>x.id===s.cuentaId);const bols=s.bolsillos||[];return `<tr><td>${fmtDate(s.fecha)}</td><td><span class="dot" style="background:${c?.color||'#00d4ff'}"></span>${c?.alias||c?.banco||'—'}</td><td style="font-size:.8rem;color:var(--muted)">${bols.length?bols.filter(b=>b.m>0).map(b=>`${b.n}: ${fmtCOP(b.m)}`).join(' · '):(s.nota||'—')}</td><td style="text-align:right" class="amount">${fmtCOP(s.monto)}</td><td><button class="btn btn-icon btn-sm btn-ghost" onclick="delSaldo('${s.id}')" title="Eliminar versión">🗑</button></td></tr>`}).join('')}
         </tbody></table></div>`:`<div class="empty"><div class="empty-icon">📋</div>Aún no has registrado saldos</div>`}
+      </div>
+      <div class="card" style="margin-top:18px"><h3>⇄ Traslados entre cuentas</h3>
+        <p style="color:var(--muted);font-size:.82rem;margin:-4px 0 14px">No suman ni restan a tu patrimonio: solo cambian de bolsillo. Por eso no aparecen en las gráficas de ingresos ni de egresos.</p>
+        ${S.traslados.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Sale de</th><th>Entra a</th><th>Nota</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
+          ${[...S.traslados].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(t=>`<tr>
+            <td>${fmtDate(t.fecha)}</td>
+            <td>${nombreCuenta(t.origenId)||'<span style="color:var(--muted)">cuenta eliminada</span>'}</td>
+            <td>${nombreCuenta(t.destinoId)||'<span style="color:var(--muted)">cuenta eliminada</span>'}</td>
+            <td style="color:var(--muted);font-size:.85rem">${t.nota||'—'}</td>
+            <td style="text-align:right" class="amount">${fmtCOP(t.monto)}</td>
+            <td><button class="btn btn-ghost btn-sm" onclick="formTraslado('${t.id}')">✎</button><button class="btn btn-ghost btn-sm" onclick="delTraslado('${t.id}')">🗑</button></td>
+          </tr>`).join('')}
+        </tbody></table></div>`:`<div class="empty"><div class="empty-icon">⇄</div>Aún no has registrado traslados</div>`}
       </div>
     `;
   }
@@ -1151,11 +1198,20 @@ function delCuenta(id){
      cualquier proyección y aun así se ven como "ya asignados". */
   const huerfanos=[...S.ingresos,...S.egresos].filter(m=>m.cuentaId===id).length;
   const cortes=S.saldos.filter(x=>x.cuentaId===id).length;
-  if(!confirm(`¿Eliminar la cuenta y sus ${cortes} corte(s)?`+(huerfanos?`\n\n${huerfanos} movimiento(s) quedarán sin cuenta asignada. No se borran.`:'')))return;
+  const tocados=S.traslados.filter(t=>t.origenId===id||t.destinoId===id).length;
+  if(!confirm(`¿Eliminar la cuenta y sus ${cortes} corte(s)?`
+    +(huerfanos?`\n\n${huerfanos} movimiento(s) quedarán sin cuenta asignada. No se borran.`:'')
+    +(tocados?`\n\n${tocados} traslado(s) se conservan con este extremo vacío, para no alterar el saldo de la otra cuenta.`:'')))return;
   S.cuentas=S.cuentas.filter(x=>x.id!==id);
   S.saldos=S.saldos.filter(x=>x.cuentaId!==id);
   S.ingresos.forEach(m=>{if(m.cuentaId===id)m.cuentaId=''});
   S.egresos .forEach(m=>{if(m.cuentaId===id)m.cuentaId=''});
+  /* El traslado se conserva con un extremo vacío en vez de borrarse: la otra
+     cuenta sí recibió (o entregó) esa plata, y eliminarlo le correría el
+     saldo proyectado por un movimiento que de verdad ocurrió. Solo se
+     descarta cuando ya no queda ninguna cuenta viva en los dos extremos. */
+  S.traslados.forEach(t=>{if(t.origenId===id)t.origenId='';if(t.destinoId===id)t.destinoId=''});
+  S.traslados=S.traslados.filter(t=>t.origenId||t.destinoId);
   if(S.config.ultimaCuentaIng===id)S.config.ultimaCuentaIng='';
   if(S.config.ultimaCuentaEg ===id)S.config.ultimaCuentaEg ='';
   saveState();rerender();toast('Cuenta eliminada');
@@ -1266,6 +1322,8 @@ function conciliar(prev,nuevo,cuenta){
       <div><span class="k">Corte anterior</span><span class="amount">${fmtCOP(prev.base)}</span></div>
       ${prev.totalIng?`<div><span class="k">Ingresos que registraste</span><span class="amount pos">+${fmtCOP(prev.totalIng)}</span></div>`:''}
       ${prev.totalEg?`<div><span class="k">Egresos que registraste</span><span class="amount neg">−${fmtCOP(prev.totalEg)}</span></div>`:''}
+      ${prev.totalIn?`<div><span class="k">Traslados recibidos</span><span class="amount pos">+${fmtCOP(prev.totalIn)}</span></div>`:''}
+      ${prev.totalOut?`<div><span class="k">Traslados enviados</span><span class="amount neg">−${fmtCOP(prev.totalOut)}</span></div>`:''}
       <div style="border-top:1px solid rgba(255,255,255,.14);padding-top:7px;margin-top:2px"><span class="k">Deberías tener</span><span class="amount">${fmtCOP(prev.proyectado)}</span></div>
       <div><span class="k">El banco dice</span><span class="amount">${fmtCOP(nuevo.monto)}</span></div>
     </div>
@@ -1273,7 +1331,7 @@ function conciliar(prev,nuevo,cuenta){
       <div style="font-size:1.4rem;font-weight:700;color:${falta?'var(--red)':'var(--green)'};font-variant-numeric:tabular-nums">${falta?'−':'+'}${fmtCOP(Math.abs(gap))}</div>
       <div style="font-size:.85rem;color:rgba(255,255,255,.75);margin-top:5px;line-height:1.5">
         ${falta
-          ?'Salió más plata de la que registraste. Suele ser compras pequeñas sin anotar, cuotas de manejo, o traslados a otra de tus cuentas.'
+          ?'Salió más plata de la que registraste. Suele ser compras pequeñas sin anotar, cuotas de manejo, o un traslado a otra cuenta tuya que no quedó registrado.'
           :'Entró más plata de la que registraste, o algún egreso quedó anotado de más.'}
       </div>
     </div>
@@ -1283,6 +1341,60 @@ function conciliar(prev,nuevo,cuenta){
 }
 
 function delSaldo(id){if(!confirm('¿Eliminar este registro?'))return;S.saldos=S.saldos.filter(x=>x.id!==id);saveState();rerender();toast('Eliminado')}
+
+/* ═══════════════════════════════════════════════════════════
+   TRASLADOS ENTRE CUENTAS PROPIAS
+   Sin esto, pasar plata de Bancolombia a Nequi aparecía como un
+   faltante en una cuenta y un sobrante en la otra, y el cuadre
+   acusaba un descuadre que en realidad nunca existió.
+   ═══════════════════════════════════════════════════════════ */
+function formTraslado(id){
+  if(S.cuentas.length<2)return toast('Necesitas al menos dos cuentas para hacer un traslado','error');
+  const t=id?S.traslados.find(x=>x.id===id):{fecha:today(),monto:'',origenId:S.cuentas[0].id,destinoId:S.cuentas[1].id,nota:''};
+  const opts=sel=>S.cuentas.map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${c.alias||c.banco}</option>`).join('');
+  openModal(`<h2>${id?'Editar':'Nuevo'} traslado</h2>
+    <p style="color:var(--muted);font-size:.86rem;line-height:1.6;margin-bottom:14px">Plata que mueves entre tus propias cuentas. No cuenta como ingreso ni como egreso: no cambia cuánto tienes, solo dónde lo tienes.</p>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
+      <div class="field"><label>Sale de</label><select class="icone-select" id="t-origen" onchange="hintTraslado('${id||''}')">${opts(t.origenId)}</select></div>
+      <div class="field"><label>Entra a</label><select class="icone-select" id="t-destino" onchange="hintTraslado('${id||''}')">${opts(t.destinoId)}</select></div>
+      <div class="field"><label>Fecha</label><input type="date" class="icone-input" id="t-fecha" value="${t.fecha}"></div>
+      <div class="field"><label>Monto (COP)</label><input type="number" step="any" class="icone-input" id="t-monto" value="${t.monto}" placeholder="0" oninput="hintTraslado('${id||''}')"></div>
+    </div>
+    <div class="field" style="margin-top:12px"><label>Nota</label><input class="icone-input" id="t-nota" value="${t.nota||''}" placeholder="Opcional"></div>
+    <div id="t-hint" class="cuenta-hint"></div>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="saveTraslado('${id||''}')">Guardar</button></div>`);
+  hintTraslado(id||'');
+}
+
+function hintTraslado(id){
+  const el=document.getElementById('t-hint');if(!el)return;
+  const o=document.getElementById('t-origen').value,d=document.getElementById('t-destino').value;
+  const m=parseFloat(document.getElementById('t-monto').value)||0;
+  if(o===d){el.innerHTML='<b style="color:var(--red)">El origen y el destino son la misma cuenta.</b>';return}
+  /* Al editar hay que sacar el traslado viejo antes de simular: si no, se
+     contaría el de antes y el nuevo a la vez. */
+  const idx=id?S.traslados.findIndex(x=>x.id===id):-1;
+  const guardado=idx>=0?S.traslados.splice(idx,1)[0]:null;
+  const po=getSaldoProyectado(o).proyectado,pd=getSaldoProyectado(d).proyectado;
+  if(guardado)S.traslados.splice(idx,0,guardado);
+  el.innerHTML=m?`Quedaría · ${nombreCuenta(o)} <b style="color:#fff">${fmtCOP(po-m)}</b> · ${nombreCuenta(d)} <b style="color:#fff">${fmtCOP(pd+m)}</b>`:'';
+}
+
+function saveTraslado(id){
+  const origenId=document.getElementById('t-origen').value;
+  const destinoId=document.getElementById('t-destino').value;
+  const monto=parseFloat(document.getElementById('t-monto').value)||0;
+  const fecha=document.getElementById('t-fecha').value||today();
+  if(origenId===destinoId)return toast('El origen y el destino no pueden ser la misma cuenta','error');
+  if(monto<=0)return toast('El monto debe ser mayor que cero','error');
+  const nota=document.getElementById('t-nota').value.trim();
+  if(id){const t=S.traslados.find(x=>x.id===id);if(t)Object.assign(t,{origenId,destinoId,monto,fecha,nota});}
+  else S.traslados.push({id:uid(),origenId,destinoId,monto,fecha,nota,createdAt:new Date().toISOString()});
+  saveState();closeModal();rerender();
+  toast('✓ '+fmtCOP(monto)+': '+nombreCuenta(origenId)+' → '+nombreCuenta(destinoId));
+}
+
+function delTraslado(id){if(!confirm('¿Eliminar este traslado? Los saldos proyectados de las dos cuentas se recalculan.'))return;S.traslados=S.traslados.filter(x=>x.id!==id);saveState();rerender();toast('Traslado eliminado')}
 
 /* ===================================================
    MÓDULO: INGRESOS
@@ -2471,6 +2583,7 @@ function importData(e){
       const d=JSON.parse(ev.target.result);
       if(!confirm('¿Reemplazar todos los datos actuales con los importados?'))return;
       S={...S,...d.state};
+      normalizeState();
       modulesCustom=d.modules||[];
       saveState();
       if(d.recibos)for(const rec of d.recibos)await dbPut(rec);
