@@ -9,3 +9,6 @@ finanzas-*.json
 
 # Copias de seguridad de las imagenes antes de reprocesarlas
 img/anterior/
+
+# El seed traia saldos reales. Vive fuera del repo, en "6. Finanzas - respaldos".
+seed-*.json

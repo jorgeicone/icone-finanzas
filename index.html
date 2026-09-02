@@ -278,8 +278,8 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.26</b></div>
-      <div style="margin-top:2px">Build 2026-08-17</div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.27</b></div>
+      <div style="margin-top:2px">Build 2026-09-02</div>
     </div>
   </aside>
 
@@ -323,7 +323,17 @@ const fmtCOP=n=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',m
 const fmtDate=d=>{if(!d)return'—';const x=new Date(d+'T00:00');return x.toLocaleDateString('es-CO',{day:'2-digit',month:'short',year:'numeric'})};
 const fmtMonth=ym=>{const[y,m]=ym.split('-');return new Date(y,m-1,1).toLocaleDateString('es-CO',{month:'short',year:'2-digit'})};
 const uid=()=>Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
-const today=()=>new Date().toISOString().slice(0,10);
+/* Fecha y mes en HORA LOCAL, nunca en UTC.
+   Antes esto era `new Date().toISOString().slice(0,10)`, que devuelve la
+   fecha en UTC. Colombia es UTC−5, así que desde las 7 de la noche el
+   reloj de la app ya estaba en el día siguiente: todo lo registrado de
+   noche quedaba fechado mañana, y el último día del mes se iba al mes
+   siguiente. Con getFullYear/getMonth/getDate el día es el que se ve en
+   el reloj de la pared, en cualquier huso. */
+const dosDig=n=>String(n).padStart(2,'0');
+const fechaLocal=d=>`${d.getFullYear()}-${dosDig(d.getMonth()+1)}-${dosDig(d.getDate())}`;
+const mesLocal=d=>`${d.getFullYear()}-${dosDig(d.getMonth()+1)}`;
+const today=()=>fechaLocal(new Date());
 const monthKey=d=>(d||today()).slice(0,7);
 
 /* ═══════════════════════════════════════════════════════════
@@ -506,7 +516,9 @@ function saveState(){
    ═══════════════════════════════════════════════════════════ */
 const SUPABASE_URL='https://nvgkhdrrxqdgxktfkioa.supabase.co';
 const SUPABASE_ANON_KEY='sb_publishable_d1RrtE7S-9a8e8mGKRRjxQ_4HU_nkDl';
-let sb=null,currentUser=null,syncTimer=null,isPulling=false;
+/* accessToken se guarda aparte porque al cerrar la pestaña ya no hay tiempo
+   de esperar un await: getSession() es asíncrono y el navegador no espera. */
+let sb=null,currentUser=null,syncTimer=null,isPulling=false,accessToken=null;
 
 function setSyncStatus(status,sub){
   const dot=document.getElementById('sync-dot');
@@ -531,11 +543,13 @@ async function initSupabase(){
   sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
   sb.auth.onAuthStateChange((event,session)=>{
     currentUser=session?.user||null;
+    accessToken=session?.access_token||null;
     if(event==='SIGNED_IN'){pullFromCloud()}
     if(event==='SIGNED_OUT'){setSyncStatus('local')}
   });
   const {data}=await sb.auth.getSession();
   currentUser=data.session?.user||null;
+  accessToken=data.session?.access_token||null;
   if(currentUser){await pullFromCloud()}else{setSyncStatus('local')}
 }
 
@@ -602,22 +616,26 @@ function scheduleCloudSync(){
   syncTimer=setTimeout(pushToCloud,200); // bajado de 800ms a 200ms
 }
 
-// Forzar push síncrono antes de cerrar la pestaña/app (evita perder ediciones recientes)
+/* Último push antes de cerrar la pestaña o la app.
+   Esto estuvo roto desde que se escribió: usaba `sb.auth.session()`, que es
+   de supabase-js v1, y la app carga la v2 (allí solo existe getSession(), y
+   es asíncrono). La cadena se resolvía a undefined, el header salía vacío,
+   la petición llegaba anónima, RLS la rechazaba y el .catch() se tragaba el
+   error. Ahora se usa el token que initSupabase mantiene al día, y si no hay
+   token no se intenta: mejor no llamar que fingir que se guardó. */
 window.addEventListener('beforeunload',()=>{
-  if(!currentUser||!syncTimer)return;
+  if(!currentUser||!syncTimer||!accessToken)return;
   clearTimeout(syncTimer);syncTimer=null;
-  // Usar sendBeacon para garantizar que el request se envíe aunque la página cierre
   try{
-    const url=`${SUPABASE_URL}/rest/v1/finanzas_data?on_conflict=user_id`;
-    const blob=new Blob([JSON.stringify({user_id:currentUser.id,data:S,modules:modulesCustom})],{type:'application/json'});
-    // sendBeacon no permite headers personalizados — usamos fetch con keepalive como respaldo
-    fetch(url,{
+    // sendBeacon no permite headers propios, así que va fetch con keepalive:
+    // el navegador la mantiene viva aunque la página ya se haya cerrado.
+    fetch(`${SUPABASE_URL}/rest/v1/finanzas_data?on_conflict=user_id`,{
       method:'POST',
       headers:{
         'Content-Type':'application/json',
         'apikey':SUPABASE_ANON_KEY,
-        'Authorization':'Bearer '+(sb?.auth?.session?.()?.access_token||''),
-        'Prefer':'resolution=merge-duplicates'
+        'Authorization':'Bearer '+accessToken,
+        'Prefer':'resolution=merge-duplicates,return=minimal'
       },
       body:JSON.stringify({user_id:currentUser.id,data:S,modules:modulesCustom}),
       keepalive:true
@@ -673,7 +691,7 @@ async function setPassword(){
 async function logoutSupabase(){
   if(!sb)return;
   await sb.auth.signOut();
-  currentUser=null;
+  currentUser=null;accessToken=null;
   setSyncStatus('local');
   rerender();
   toast('Sesión cerrada (datos siguen locales)');
@@ -791,7 +809,7 @@ function pctDelta(now,prev,inverse=false){
   const positive=inverse?d<0:d>0;
   return `<span class="${positive?'up':'down'}">${d>=0?'▲':'▼'} ${Math.abs(d).toFixed(1)}% vs mes anterior</span>`;
 }
-function getPrevMonth(ym){const[y,m]=ym.split('-').map(Number);const d=new Date(y,m-2,1);return d.toISOString().slice(0,7)}
+function getPrevMonth(ym){const[y,m]=ym.split('-').map(Number);const d=new Date(y,m-2,1);return mesLocal(d)}
 
 /* Devuelve el saldo MÁS RECIENTE de una cuenta.
    Si hay varios con la misma fecha, gana el último insertado (índice mayor). */
@@ -953,10 +971,20 @@ const tooltipPct={
   }}
 };
 
+/* Etiquetas del eje de montos. Antes era `(v/1000).toFixed(0)+'k'`, que con
+   una gráfica en ceros repetía «0k, 0k, -0k» en todos los renglones, y con
+   tus cifras reales mostraba «4700k» donde se lee mejor «$4,7M». */
+function ejeMonto(v){
+  if(!v)return '0';
+  const abs=Math.abs(v);
+  if(abs>=1e6)return (v/1e6).toFixed(abs<1e7?1:0).replace('.',',')+'M';
+  if(abs>=1000)return Math.round(v/1000)+'k';
+  return v;
+}
 const chartBase={
   plugins:{legend:{labels:{color:'#fff',font:{size:11}}},tooltip:tooltipPct},
   scales:{x:{ticks:{color:'rgba(255,255,255,.7)'},grid:{color:'rgba(255,255,255,.06)'}},
-          y:{ticks:{color:'rgba(255,255,255,.7)',callback:v=>(v/1000).toFixed(0)+'k'},grid:{color:'rgba(255,255,255,.06)'}}},
+          y:{ticks:{color:'rgba(255,255,255,.7)',callback:ejeMonto},grid:{color:'rgba(255,255,255,.06)'}}},
   maintainAspectRatio:false,responsive:true,
   interaction:{mode:'index',intersect:false}
 };
@@ -983,7 +1011,7 @@ function renderDashboardCharts(){
   const ctx2=document.getElementById('ch-flujo');
   if(ctx2){
     const months=[];const d=new Date();d.setDate(1);
-    for(let i=5;i>=0;i--){const x=new Date(d);x.setMonth(d.getMonth()-i);months.push(x.toISOString().slice(0,7))}
+    for(let i=5;i>=0;i--){const x=new Date(d);x.setMonth(d.getMonth()-i);months.push(mesLocal(x))}
     const ing=months.map(m=>S.ingresos.filter(x=>monthKey(x.fecha)===m).reduce((a,b)=>a+b.monto,0));
     const eg=months.map(m=>S.egresos.filter(x=>monthKey(x.fecha)===m).reduce((a,b)=>a+b.monto,0));
     charts.flujo=new Chart(ctx2,{type:'bar',data:{labels:months.map(fmtMonth),datasets:[
@@ -1066,7 +1094,7 @@ function renderDashboardCharts(){
 /* Últimos N meses en formato YYYY-MM, terminando en el actual. */
 function ultimosMeses(n){
   const out=[],d=new Date();d.setDate(1);
-  for(let i=n-1;i>=0;i--){const x=new Date(d);x.setMonth(d.getMonth()-i);out.push(x.toISOString().slice(0,7))}
+  for(let i=n-1;i>=0;i--){const x=new Date(d);x.setMonth(d.getMonth()-i);out.push(mesLocal(x))}
   return out;
 }
 
@@ -1281,6 +1309,10 @@ function saveSaldo(){
     if(!bolsillos.length)return toast('Agrega al menos un bolsillo','error');
     const cuentaId=document.getElementById('f-cuenta').value;
     const fecha=document.getElementById('f-fecha').value;
+    /* Un corte sin fecha rompe getUltimoSaldo: las comparaciones son de
+       texto, y '' pierde contra cualquier fecha real, así que el corte
+       quedaría guardado pero nunca sería el más reciente de su cuenta. */
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(fecha))return toast('Falta la fecha del corte','error');
     const nuevo={id:uid(),cuentaId,fecha,monto:total,bolsillos,nota:document.getElementById('f-nota').value.trim(),createdAt:new Date().toISOString()};
     /* Hay que capturar la proyección ANTES de guardar el corte nuevo:
        después ya no existe, porque el corte nuevo pasa a ser la base. */
@@ -1446,7 +1478,7 @@ function renderMovChart(tipo){
   destroyChart(id);
   const arr=tipo==='ing'?S.ingresos:S.egresos;
   const months=[];const d=new Date();d.setDate(1);
-  for(let i=5;i>=0;i--){const x=new Date(d);x.setMonth(d.getMonth()-i);months.push(x.toISOString().slice(0,7))}
+  for(let i=5;i>=0;i--){const x=new Date(d);x.setMonth(d.getMonth()-i);months.push(mesLocal(x))}
   const data=months.map(m=>arr.filter(x=>monthKey(x.fecha)===m).reduce((a,b)=>a+b.monto,0));
   charts[id]=new Chart(ctx,{type:'bar',data:{labels:months.map(fmtMonth),datasets:[{label:tipo==='ing'?'Ingresos':'Egresos',data,backgroundColor:tipo==='ing'?'rgba(0,212,138,.7)':'rgba(255,71,87,.7)',borderColor:tipo==='ing'?'#00d48a':'#ff4757',borderWidth:1}]},options:chartBase});
   pintarBarrasCategoria(tipo);
@@ -1521,7 +1553,11 @@ function formMov(tipo,id){
   const cats=tipo==='ing'?S.catIngreso:S.catEgreso;
   const ultima=(tipo==='ing'?S.config.ultimaCuentaIng:S.config.ultimaCuentaEg)||'';
   const m=id?arr.find(x=>x.id===id):{fecha:today(),monto:'',categoria:cats[0],fuente:'',metodo:S.metodos[0],cuentaId:ultima,nota:'',recibos:[]};
-  _pendingRecibos=[];
+  /* Las dos listas se vacían al ABRIR el formulario, no solo al guardarlo.
+     _removedExisting solo se limpiaba al final de saveMov, así que si
+     quitabas un recibo y cancelabas, el id quedaba en la lista y el
+     siguiente movimiento que guardaras ejecutaba ese borrado. */
+  _pendingRecibos=[];_removedExisting=[];
   openModal(`<h2>${id?'Editar':'Nuevo'} ${tipo==='ing'?'ingreso':'egreso'}</h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
       <div class="field"><label>Fecha</label><input type="date" class="icone-input" id="f-fecha" value="${m.fecha}"></div>
@@ -1576,8 +1612,13 @@ function removeNewPreview(btn,id){_pendingRecibos=_pendingRecibos.filter(r=>r.id
 async function saveMov(tipo,id){
   const monto=parseFloat(document.getElementById('f-monto').value);
   if(isNaN(monto)||monto<=0)return toast('Monto inválido','error');
+  /* La fecha se valida igual que el monto. Sin esto, un campo vacío se
+     guardaba como fecha:'' y el movimiento desaparecía de todas las
+     gráficas y de la proyección de saldos sin decir una palabra. */
+  const fecha=document.getElementById('f-fecha').value;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(fecha))return toast('Falta la fecha del movimiento','error');
   const data={
-    fecha:document.getElementById('f-fecha').value,
+    fecha,
     monto,categoria:document.getElementById('f-cat').value,
     nota:document.getElementById('f-nota').value.trim()
   };
@@ -2522,8 +2563,8 @@ function renderConfig(){
 
     <div class="card" style="margin-bottom:18px;border:1px solid rgba(255,140,0,.3)">
       <h3>🔄 ¿Algo no se guarda o se ve raro?</h3>
-      <p style="color:var(--muted);font-size:.9rem;margin-bottom:14px">Si la app no se actualiza después de guardar, es porque tienes datos viejos en caché. Este botón limpia TODO y vuelve a cargar los saldos iniciales frescos.</p>
-      <button class="btn btn-outline btn-lg" onclick="forceReset()" style="width:100%">🔄 Reiniciar app con datos limpios</button>
+      <p style="color:var(--muted);font-size:.9rem;margin-bottom:14px">Borra la copia guardada en este dispositivo y la vuelve a bajar de la nube. Úsalo solo si algo se ve desactualizado y refrescar no lo arregla. <b>Si no has iniciado sesión, la app queda vacía.</b></p>
+      <button class="btn btn-outline btn-lg" onclick="forceReset()" style="width:100%">🔄 Rehacer la copia local desde la nube</button>
     </div>
     <div class="grid-2">
       <div class="card"><h3>💾 Respaldo de datos</h3>
@@ -2599,7 +2640,9 @@ async function wipeAll(){
   location.reload();
 }
 async function forceReset(){
-  if(!confirm('¿Reiniciar la app con los saldos iniciales? Esto borra tus cambios locales y carga el seed fresco.'))return;
+  /* Ya no hay seed que recargar: esto borra la copia local y vuelve a
+     bajar de la nube. Si no hay sesión iniciada, la app arranca vacía. */
+  if(!confirm('Se borrarán los datos guardados en ESTE dispositivo y se volverán a bajar de la nube.\n\nSi no has iniciado sesión, la app quedará vacía y tendrás que importar un respaldo. ¿Continuar?'))return;
   localStorage.clear();
   const all=await dbAll();for(const r of all)await dbDel(r.id);
   // forzar bypass de caché agregando timestamp a la URL
@@ -2752,16 +2795,13 @@ function initParticles(){
 /* ===================================================
    INICIALIZACIÓN
    =================================================== */
-/* [Los datos iniciales se retiraron de todo el historial el 2 de septiembre
-   de 2026: eran saldos bancarios reales en un repositorio público.] */
+/* Sin datos iniciales embebidos.
+   Hasta la v0.26 aquí vivían nueve cuentas reales con sus saldos y el
+   nombre de cada bolsillo. Este repositorio es público y el HTML se sirve
+   sin autenticación, así que eso era publicar el estado financiero de una
+   persona en internet. La app arranca vacía: los datos entran por login y
+   sincronización, o por Configuración → Importar JSON. */
 
-function autoSeed(){
-  if(localStorage.getItem(STORE_KEY))return false; // ya tiene datos
-  Object.assign(S,SEED);
-  modulesCustom=SEED_MODULES;
-  saveState();
-  return true;
-}
 
 /* Tracking del cursor para efecto shine en botones (Tesla-style) */
 document.addEventListener('mousemove',e=>{
@@ -2772,12 +2812,10 @@ document.addEventListener('mousemove',e=>{
 });
 
 (async function init(){
-  const seeded=autoSeed();
   loadState();
   await openDB();
   initParticles();
   rerender();
-  if(seeded)setTimeout(()=>toast('✓ Saldos iniciales cargados ($3.760.384)'),600);
   // Inicializar sincronización (no bloquea el render)
   initSupabase();
 })();
