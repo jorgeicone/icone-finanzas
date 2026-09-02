@@ -286,7 +286,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.29</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.30</b></div>
       <div style="margin-top:2px">Build 2026-09-02</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -353,6 +353,7 @@ const esc=v=>String(v==null?'':v)
 const fmtCOP=n=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n||0);
 const fmtDate=d=>{if(!d)return'—';const x=new Date(d+'T00:00');return x.toLocaleDateString('es-CO',{day:'2-digit',month:'short',year:'numeric'})};
 const fmtMonth=ym=>{const[y,m]=ym.split('-');return new Date(y,m-1,1).toLocaleDateString('es-CO',{month:'short',year:'2-digit'})};
+const fmtMonthLargo=ym=>{const[y,m]=ym.split('-');return new Date(y,m-1,1).toLocaleDateString('es-CO',{month:'long',year:'numeric'})};
 const uid=()=>Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
 /* Fecha y mes en HORA LOCAL, nunca en UTC.
    Antes esto era `new Date().toISOString().slice(0,10)`, que devuelve la
@@ -1084,10 +1085,10 @@ const nombreCuenta=id=>{const c=S.cuentas.find(x=>x.id===id);return c?(c.alias||
 /* Selector de cuenta para lotes (escaneo y dictado). Una factura se paga
    de una sola cuenta, asi que no tiene sentido preguntarlo linea por
    linea como si fuera el metodo de pago. */
-function selectCuentaLote(id,label){
+function selectCuentaLote(id,label,alCambiar){
   if(!S.cuentas.length)return '';
-  return `<div class="field" style="margin-top:14px"><label>${label}</label>
-    <select class="icone-select" id="${id}">
+  return `<div class="field" style="margin-top:14px"><label for="${id}">${label}</label>
+    <select class="icone-select" id="${id}"${alCambiar?` onchange="${alCambiar}"`:''}>
       <option value="">— Sin especificar —</option>
       ${S.cuentas.map(c=>`<option value="${c.id}" ${S.config.ultimaCuentaEg===c.id?'selected':''}>${esc(c.alias||c.banco)}</option>`).join('')}
     </select></div>`;
@@ -1694,6 +1695,18 @@ registerModule({
   render(){return renderMovList('eg')}
 });
 
+/* Filtro de la lista: por mes del GASTO y por texto.
+   Sin esto no había forma de comprobar dónde cayó un movimiento: si hoy
+   registras una factura del 31 de agosto, queda ordenada entre las de
+   agosto y hay que bajar a buscarla a ojo. */
+let _filtroMes={ing:'',eg:''},_filtroTexto={ing:'',eg:''};
+function cambiarFiltroMes(tipo,v){_filtroMes[tipo]=v;rerender()}
+function cambiarFiltroTexto(tipo,v){_filtroTexto[tipo]=v;rerender()}
+
+/* Fecha en que se anotó el movimiento, si la app la guardó. Los registros
+   anteriores a la v0.30 no la traen: ahí se muestra solo la del gasto. */
+const fechaAnotado=m=>m.createdAt?fechaLocal(new Date(m.createdAt)):null;
+
 function renderMovList(tipo){
   const arr=tipo==='ing'?S.ingresos:S.egresos;
   const cats=tipo==='ing'?S.catIngreso:S.catEgreso;
@@ -1701,6 +1714,38 @@ function renderMovList(tipo){
   const totTot=arr.reduce((a,b)=>a+b.monto,0);
   // agregados por categoría
   const porCat={};arr.forEach(x=>{porCat[x.categoria]=(porCat[x.categoria]||0)+x.monto});
+
+  const meses=[...new Set(arr.map(x=>monthKey(x.fecha)))].sort().reverse();
+  const mesSel=_filtroMes[tipo],txt=(_filtroTexto[tipo]||'').toLowerCase();
+  const visibles=arr.filter(m=>{
+    if(mesSel&&monthKey(m.fecha)!==mesSel)return false;
+    if(!txt)return true;
+    return [m.nota,m.categoria,m.subcategoria,m.fuente,m.metodo,nombreCuenta(m.cuentaId)]
+      .some(v=>(v||'').toLowerCase().includes(txt));
+  });
+  const totVisible=visibles.reduce((a,b)=>a+b.monto,0);
+  const filtrando=!!(mesSel||txt);
+
+  const barraFiltros=`
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:-4px 0 14px">
+      <div class="field" style="min-width:170px">
+        <label for="filtro-mes-${tipo}">Mes del gasto</label>
+        <select class="icone-select" id="filtro-mes-${tipo}" onchange="cambiarFiltroMes('${tipo}',this.value)">
+          <option value="">Todos los meses</option>
+          ${meses.map(m=>`<option value="${m}" ${m===mesSel?'selected':''}>${fmtMonthLargo(m)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field" style="flex:1;min-width:190px">
+        <label for="filtro-txt-${tipo}">Buscar</label>
+        <input class="icone-input" id="filtro-txt-${tipo}" value="${esc(_filtroTexto[tipo])}"
+          placeholder="nota, categoría, cuenta…" onchange="cambiarFiltroTexto('${tipo}',this.value)">
+      </div>
+      ${filtrando?`<button class="btn btn-ghost btn-sm" onclick="cambiarFiltroMes('${tipo}','');cambiarFiltroTexto('${tipo}','')">Quitar filtros</button>`:''}
+    </div>
+    ${filtrando?`<div style="margin:-6px 0 12px;font-size:.88rem;color:var(--muted)">
+      <b style="color:#fff">${visibles.length}</b> de ${arr.length} movimiento(s) ·
+      suma <b class="amount ${tipo==='ing'?'pos':'neg'}">${fmtCOP(totVisible)}</b></div>`:''}`;
+
   return `
     <div class="kpi-grid">
       <div class="kpi ${tipo==='ing'?'green':'red'}"><div class="kpi-label">Total del mes</div><div class="kpi-value">${fmtCOP(totMes)}</div></div>
@@ -1712,9 +1757,12 @@ function renderMovList(tipo){
       <div class="card"><h3>📅 Últimos 6 meses</h3><div class="chart-wrap-sm"><canvas id="ch-mov-${tipo}"></canvas></div></div>
     </div>
     <div class="card" style="margin-top:18px"><h3>📋 Movimientos</h3>
-      ${arr.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Categoría</th><th>${tipo==='ing'?'Fuente':'Método'}</th><th>Nota</th><th>Recibos</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
-        ${[...arr].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${esc(m.categoria)}</span>${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${esc(m.subcategoria)}</div>`:''}</td><td>${esc(tipo==='ing'?(m.fuente||'—'):(m.metodo||'—'))}${m.cuentaId&&nombreCuenta(m.cuentaId)?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">🏦 ${esc(nombreCuenta(m.cuentaId))}</div>`:''}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.nota||'—')}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')" aria-label="Editar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')" aria-label="Eliminar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">🗑</button></td></tr>`).join('')}
-      </tbody></table></div>`:`<div class="empty"><div class="empty-icon">${tipo==='ing'?'💵':'💸'}</div>No hay ${tipo==='ing'?'ingresos':'egresos'} registrados</div>`}
+      ${barraFiltros}
+      ${visibles.length?`<div class="table-wrap"><table><thead><tr><th>Fecha del gasto</th><th>Categoría</th><th>${tipo==='ing'?'Fuente':'Método'}</th><th>Nota</th><th>Recibos</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
+        ${[...visibles].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td><div style="font-weight:600">${fmtDate(m.fecha)}</div>${fechaAnotado(m)&&fechaAnotado(m)!==m.fecha?`<div style="color:var(--muted);font-size:.7rem;margin-top:2px">anotado el ${fmtDate(fechaAnotado(m))}</div>`:''}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${esc(m.categoria)}</span>${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${esc(m.subcategoria)}</div>`:''}</td><td>${esc(tipo==='ing'?(m.fuente||'—'):(m.metodo||'—'))}${m.cuentaId&&nombreCuenta(m.cuentaId)?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">🏦 ${esc(nombreCuenta(m.cuentaId))}</div>`:''}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.nota||'—')}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')" aria-label="Editar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')" aria-label="Eliminar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">🗑</button></td></tr>`).join('')}
+      </tbody></table></div>`:(arr.length
+        ?`<div class="empty"><div class="empty-icon">🔍</div>Ningún movimiento coincide con el filtro.</div>`
+        :`<div class="empty"><div class="empty-icon">${tipo==='ing'?'💵':'💸'}</div>No hay ${tipo==='ing'?'ingresos':'egresos'} registrados</div>`)}
     </div>
   `;
 }
@@ -1902,7 +1950,10 @@ async function saveMov(tipo,id){
     Object.assign(m,data);
     m.recibos=[...keepIds,..._pendingRecibos.map(r=>r.id)];
   }else{
-    arr.push({id:uid(),...data,recibos:_pendingRecibos.map(r=>r.id)});
+    /* createdAt guarda CUÁNDO lo anotaste, que no es lo mismo que la fecha
+       del gasto. Sirve para que la lista pueda decir «gasto del 31 de agosto,
+       anotado el 2 de septiembre» y no quede duda de dónde cayó. */
+    arr.push({id:uid(),...data,recibos:_pendingRecibos.map(r=>r.id),createdAt:new Date().toISOString()});
   }
   _pendingRecibos=[];_removedExisting=[];
   saveState();closeModal();rerender();toast('Movimiento guardado');
@@ -2188,7 +2239,8 @@ function renderRevisionEscaneo(){
       <td><select class="icone-select esc-cat" onchange="refrescarSubcat(this.closest('tr').querySelector('.sub-wrap'),this.value);recalcEscaneo()">${opcionesCat(it.categoria)}</select></td>
       <td>${campoSubcat(it.categoria,it.subcategoria,'120px')}</td>
       <td><select class="icone-select esc-met">${S.metodos.map(x=>`<option ${it.metodo===x?'selected':''}>${esc(x)}</option>`).join('')}</select></td>
-      <td><input type="date" class="icone-input esc-fecha" value="${f}"></td>
+      <td><input type="date" class="icone-input esc-fecha" value="${f}" onchange="recalcEscaneo()">
+          <div class="esc-aviso-fecha" style="font-size:.7rem;line-height:1.35;margin-top:3px"></div></td>
       <td><input type="number" step="any" class="icone-input esc-monto" value="${it.monto}" style="max-width:110px;text-align:right" oninput="recalcEscaneo()"></td>
     </tr>`;
   }).join('');
@@ -2227,7 +2279,7 @@ function renderRevisionEscaneo(){
         <div class="field" style="flex:1;min-width:150px"><label>Subcategoría</label>${campoSubcat('','','150px')}</div>
       </div>
     </div>
-    ${selectCuentaLote('esc-cuenta','¿De qué cuenta salió esta factura?')}
+    ${selectCuentaLote('esc-cuenta','¿De qué cuenta salió esta factura?','recalcEscaneo()')}
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary" id="esc-guardar" onclick="guardarEscaneo()">Guardar</button>
@@ -2253,12 +2305,6 @@ function recalcEscaneo(){
   });
   const reparto=Object.entries(porCat).sort((a,b)=>b[1]-a[1]);
 
-  document.getElementById('esc-resumen').innerHTML=
-    `<b>${sel.length}</b> de ${filas.length} seleccionados · suma <b class="amount neg">${fmtCOP(suma)}</b>`+
-    (total&&desfase>1?` · <span style="color:var(--yellow)">no cuadra con el total impreso (${fmtCOP(total)}), diferencia ${fmtCOP(desfase)}</span>`:
-      total?` · <span style="color:var(--green)">cuadra con el total impreso ✓</span>`:'')+
-    (reparto.length>1?`<div style="margin-top:6px;color:var(--muted);font-size:.82rem">Se reparte en ${reparto.length} categorías: ${reparto.map(([c,v])=>`${c} ${fmtCOP(v)}`).join(' · ')}</div>`:'');
-
   // Bloque de agrupado: al activarlo, propone la categoría que más pesa.
   const grupo=document.getElementById('esc-grupo');
   if(grupo){
@@ -2274,6 +2320,35 @@ function recalcEscaneo(){
       if(subDom)wGrupo.querySelector('.sub-sel').innerHTML=opcionesSubcat(catDom,subDom);
     }
   }
+
+  /* Aviso de fecha previa al corte.
+     El saldo proyectado solo suma movimientos POSTERIORES al último corte
+     de la cuenta: si la factura es más vieja, el gasto se registra pero no
+     mueve el saldo, porque se asume que la foto del banco ya lo refleja.
+     Es correcto, pero sin decirlo parece que el registro no sirvió. */
+  const cuentaSel=document.getElementById('esc-cuenta')?.value||'';
+  const corte=cuentaSel?getUltimoSaldo(cuentaSel):null;
+  let previas=0;
+  filas.forEach(tr=>{
+    const av=tr.querySelector('.esc-aviso-fecha');if(!av)return;
+    const f=tr.querySelector('.esc-fecha').value;
+    const marcada=tr.querySelector('.esc-chk').checked;
+    if(corte&&f&&f<=corte.fecha){
+      av.innerHTML='<span style="color:var(--yellow)">↩ previa a tu corte</span>';
+      if(marcada)previas++;
+    }else av.innerHTML='';
+  });
+
+  const resumen=document.getElementById('esc-resumen');
+  resumen.innerHTML=
+    `<b>${sel.length}</b> de ${filas.length} seleccionados · suma <b class="amount neg">${fmtCOP(suma)}</b>`+
+    (total&&desfase>1?` · <span style="color:var(--yellow)">no cuadra con el total impreso (${fmtCOP(total)}), diferencia ${fmtCOP(desfase)}</span>`:
+      total?` · <span style="color:var(--green)">cuadra con el total impreso ✓</span>`:'')+
+    (reparto.length>1?`<div style="margin-top:6px;color:var(--muted);font-size:.82rem">Se reparte en ${reparto.length} categorías: ${reparto.map(([c,v])=>`${esc(c)} ${fmtCOP(v)}`).join(' · ')}</div>`:'')+
+    (previas?`<div style="margin-top:8px;padding:9px 12px;border-radius:10px;background:rgba(255,217,61,.10);border:1px solid rgba(255,217,61,.28);color:rgba(255,255,255,.82);font-size:.82rem;line-height:1.5">
+      <b style="color:var(--yellow)">${previas} línea(s) con fecha anterior a tu corte del ${fmtDate(corte.fecha)}</b> en ${esc(nombreCuenta(cuentaSel))}.
+      Se guardan con su fecha real y cuentan en tus totales del mes, pero <b>no moverán el saldo proyectado</b>:
+      ese corte del banco ya las incluye, y sumarlas las contaría dos veces.</div>`:'');
 
   const btn=document.getElementById('esc-guardar');
   btn.textContent=sel.length?(agrupar?'Guardar 1 gasto':`Guardar ${sel.length} gasto${sel.length>1?'s':''}`):'Guardar';
@@ -2308,12 +2383,14 @@ async function guardarEscaneo(){
     const sub=valorSubcat(document.querySelector('#esc-grupo .sub-wrap'));
     S.egresos.push({id:uid(),fecha:datos[0].fecha,monto:datos.reduce((a,b)=>a+b.monto,0),
       categoria:cat,subcategoria:sub,metodo:datos[0].metodo,cuentaId,
-      nota:(pre+datos.map(d=>d.descripcion).join(', ')).slice(0,300),recibos:[rec.id]});
+      nota:(pre+datos.map(d=>d.descripcion).join(', ')).slice(0,300),recibos:[rec.id],
+      createdAt:new Date().toISOString()});
     aprenderSubcategoria(cat,sub);
   }else{
     datos.forEach(d=>{
       S.egresos.push({id:uid(),fecha:d.fecha,monto:d.monto,categoria:d.categoria,
-        subcategoria:d.subcategoria,metodo:d.metodo,cuentaId,nota:pre+d.descripcion,recibos:[rec.id]});
+        subcategoria:d.subcategoria,metodo:d.metodo,cuentaId,nota:pre+d.descripcion,recibos:[rec.id],
+        createdAt:new Date().toISOString()});
       aprenderSubcategoria(d.categoria,d.subcategoria);
     });
   }
@@ -2620,7 +2697,8 @@ function guardarVoz(){
     if(monto<=0)return;
     const base={id:uid(),fecha:tr.querySelector('.vz-fecha').value||today(),monto,
       categoria:tr.querySelector('.vz-cat').value,
-      nota:tr.querySelector('.vz-desc').value.trim(),cuentaId,recibos:[]};
+      nota:tr.querySelector('.vz-desc').value.trim(),cuentaId,recibos:[],
+      createdAt:new Date().toISOString()};
     if(tr.dataset.tipo==='ing'){
       S.ingresos.push({...base,fuente:''});nIng++;
     }else{
