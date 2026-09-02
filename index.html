@@ -124,6 +124,22 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 }
 .btn-outline:hover{--bg:rgba(0,212,255,.16);--bd:rgba(0,212,255,.7)}
 
+/* Control segmentado de dos opciones (ámbito personal / negocio) */
+.seg{display:inline-flex;gap:4px;padding:4px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1)}
+.seg button{
+  flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  padding:9px 18px;border-radius:999px;border:1px solid transparent;background:transparent;
+  color:rgba(255,255,255,.6);font-family:inherit;font-size:.88rem;font-weight:600;
+  letter-spacing:-.01em;cursor:pointer;white-space:nowrap;
+  transition:background .18s,color .18s,border-color .18s;-webkit-tap-highlight-color:transparent;
+}
+.seg button:hover{color:#fff;background:rgba(255,255,255,.06)}
+.seg button.on{
+  color:#fff;background:linear-gradient(135deg,rgba(0,212,255,.22),rgba(123,47,255,.16));
+  border-color:rgba(0,212,255,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.1)
+}
+.badge.negocio{background:rgba(123,47,255,.18);color:#c9a8ff;border:1px solid rgba(123,47,255,.35)}
+
 /* Ghost: glass neutro */
 .btn-ghost{--bg:rgba(255,255,255,.07);--bd:rgba(255,255,255,.1)}
 .btn-ghost:hover{--bg:rgba(255,255,255,.14);--bd:rgba(255,255,255,.18)}
@@ -286,7 +302,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.30</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.31</b></div>
       <div style="margin-top:2px">Build 2026-09-02</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -414,6 +430,59 @@ let S={
   config:{moneda:'COP',frecuencia:'mensual',nombre:'Mi finanzas'}
 };
 let modulesCustom=[]; // módulos extra creados por usuario
+
+/* ═══════════════════════════════════════════════════════════
+   ÁMBITO — personal o del negocio
+
+   Un solo campo en cada movimiento, y el más urgente de todos: cada gasto
+   que se anota sin él es historia revuelta que después hay que separar a
+   mano. Sin esta separación no existe el estado de resultados de ICONE, ni
+   se puede provisionar impuestos sobre lo que de verdad factura el negocio.
+
+   Los movimientos viejos no lo traen: se leen como 'personal' en vez de
+   escribirles el campo, para no tocar 285 registros por una suposición.
+   ═══════════════════════════════════════════════════════════ */
+const AMBITOS=[
+  {id:'personal',etiqueta:'Personal',icono:'🏠'},
+  {id:'negocio', etiqueta:'Negocio', icono:'💼'}
+];
+const ambitoDe=m=>m&&m.ambito==='negocio'?'negocio':'personal';
+const ambitoEtiqueta=a=>(AMBITOS.find(x=>x.id===a)||AMBITOS[0]).etiqueta;
+
+/* Control de dos opciones en vez de un desplegable: es un campo que tocas
+   en cada registro, y en el celular un toque gana a dos. */
+function campoAmbito(sel,id='f-ambito'){
+  const v=sel==='negocio'?'negocio':'personal';
+  return `<div class="field" style="margin-top:12px">
+    <label id="${id}-lbl">¿Es personal o del negocio?</label>
+    <div class="seg" id="${id}" data-valor="${v}" role="radiogroup" aria-labelledby="${id}-lbl">
+      ${AMBITOS.map(a=>`<button type="button" role="radio" aria-checked="${a.id===v}"
+        class="${a.id===v?'on':''}" data-a="${a.id}"
+        onclick="elegirAmbito('${id}','${a.id}')"><span aria-hidden="true">${a.icono}</span> ${a.etiqueta}</button>`).join('')}
+    </div>
+  </div>`;
+}
+function elegirAmbito(id,valor){
+  const w=document.getElementById(id);if(!w)return;
+  w.dataset.valor=valor;
+  w.querySelectorAll('button').forEach(b=>{
+    const on=b.dataset.a===valor;
+    b.classList.toggle('on',on);
+    b.setAttribute('aria-checked',on?'true':'false');
+  });
+}
+function valorAmbito(id='f-ambito'){
+  const w=document.getElementById(id);
+  return w&&w.dataset.valor==='negocio'?'negocio':'personal';
+}
+/* Se recuerda el último usado por tipo de movimiento, igual que la cuenta:
+   quien factura suele registrar varios gastos de negocio seguidos. */
+function ultimoAmbito(tipo){
+  return (tipo==='ing'?S.config.ultimoAmbitoIng:S.config.ultimoAmbitoEg)||'personal';
+}
+function recordarAmbito(tipo,v){
+  if(tipo==='ing')S.config.ultimoAmbitoIng=v;else S.config.ultimoAmbitoEg=v;
+}
 
 /* Los estados guardados antes de una versión no traen los campos nuevos:
    el tuyo, sin ir más lejos, no tiene 'traslados'. El spread de loadState
@@ -1010,6 +1079,7 @@ registerModule({
         <div class="kpi red"><div class="kpi-label">Egresos del mes</div><div class="kpi-value">${fmtCOP(egMes)}</div><div class="kpi-meta">${pctDelta(egMes,egPrev,true)}</div></div>
         <div class="kpi orange"><div class="kpi-label">Flujo neto</div><div class="kpi-value" style="color:${flujo>=0?'var(--green)':'var(--red)'}">${fmtCOP(flujo)}</div><div class="kpi-meta">${flujo>=0?'Superávit':'Déficit'} del mes</div></div>
       </div>
+      ${repartoAmbito(mk)}
 
       <div class="grid-2">
         <div class="card"><h3>📈 Evolución de saldos</h3><div class="chart-wrap"><canvas id="ch-saldos"></canvas></div></div>
@@ -1038,6 +1108,35 @@ registerModule({
   },
   afterRender(){renderDashboardCharts()}
 });
+
+/* Reparto personal / negocio del mes. Solo aparece cuando de verdad hay
+   algo marcado como negocio: si toda tu plata es personal, una tarjeta que
+   dice «negocio $0» es ruido. */
+function repartoAmbito(mk){
+  const delMes=t=>(t==='ing'?S.ingresos:S.egresos).filter(x=>monthKey(x.fecha)===mk);
+  const suma=(t,a)=>delMes(t).filter(x=>ambitoDe(x)===a).reduce((s,b)=>s+b.monto,0);
+  const egN=suma('eg','negocio'),ingN=suma('ing','negocio');
+  if(!egN&&!ingN)return '';
+  const egP=suma('eg','personal'),ingP=suma('ing','personal');
+  const barra=(a,b,ca,cb)=>{
+    const t=a+b;if(!t)return '';
+    return `<div style="display:flex;height:8px;border-radius:50px;overflow:hidden;margin-top:8px;background:rgba(255,255,255,.06)">
+      <div style="width:${a/t*100}%;background:${ca}"></div><div style="width:${b/t*100}%;background:${cb}"></div></div>`;
+  };
+  const bloque=(titulo,p,n,ca,cb)=>`<div class="card" style="padding:16px 18px">
+    <div style="font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600">${titulo}</div>
+    <div style="display:flex;justify-content:space-between;gap:12px;margin-top:10px;font-size:.9rem">
+      <span>🏠 Personal</span><b class="amount" style="font-variant-numeric:tabular-nums">${fmtCOP(p)}</b></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;margin-top:5px;font-size:.9rem">
+      <span>💼 Negocio</span><b class="amount" style="font-variant-numeric:tabular-nums">${fmtCOP(n)}</b></div>
+    ${barra(p,n,ca,cb)}
+    <div style="font-size:.76rem;color:var(--muted);margin-top:7px">${p+n?Math.round(n/(p+n)*100):0}% del negocio</div>
+  </div>`;
+  return `<div class="grid-2" style="margin-bottom:18px">
+    ${bloque('Egresos del mes por ámbito',egP,egN,'#ff4757','#7b2fff')}
+    ${ingP+ingN?bloque('Ingresos del mes por ámbito',ingP,ingN,'#00d48a','#7b2fff'):''}
+  </div>`;
+}
 
 function pctDelta(now,prev,inverse=false){
   if(!prev)return prev===0&&now===0?'<span style="color:var(--muted)">Sin datos previos</span>':'<span class="up">Nuevo registro</span>';
@@ -1699,9 +1798,10 @@ registerModule({
    Sin esto no había forma de comprobar dónde cayó un movimiento: si hoy
    registras una factura del 31 de agosto, queda ordenada entre las de
    agosto y hay que bajar a buscarla a ojo. */
-let _filtroMes={ing:'',eg:''},_filtroTexto={ing:'',eg:''};
+let _filtroMes={ing:'',eg:''},_filtroTexto={ing:'',eg:''},_filtroAmbito={ing:'',eg:''};
 function cambiarFiltroMes(tipo,v){_filtroMes[tipo]=v;rerender()}
 function cambiarFiltroTexto(tipo,v){_filtroTexto[tipo]=v;rerender()}
+function cambiarFiltroAmbito(tipo,v){_filtroAmbito[tipo]=v;rerender()}
 
 /* Fecha en que se anotó el movimiento, si la app la guardó. Los registros
    anteriores a la v0.30 no la traen: ahí se muestra solo la del gasto. */
@@ -1716,15 +1816,17 @@ function renderMovList(tipo){
   const porCat={};arr.forEach(x=>{porCat[x.categoria]=(porCat[x.categoria]||0)+x.monto});
 
   const meses=[...new Set(arr.map(x=>monthKey(x.fecha)))].sort().reverse();
-  const mesSel=_filtroMes[tipo],txt=(_filtroTexto[tipo]||'').toLowerCase();
+  const mesSel=_filtroMes[tipo],txt=(_filtroTexto[tipo]||'').toLowerCase(),ambSel=_filtroAmbito[tipo];
   const visibles=arr.filter(m=>{
     if(mesSel&&monthKey(m.fecha)!==mesSel)return false;
+    if(ambSel&&ambitoDe(m)!==ambSel)return false;
     if(!txt)return true;
     return [m.nota,m.categoria,m.subcategoria,m.fuente,m.metodo,nombreCuenta(m.cuentaId)]
       .some(v=>(v||'').toLowerCase().includes(txt));
   });
   const totVisible=visibles.reduce((a,b)=>a+b.monto,0);
-  const filtrando=!!(mesSel||txt);
+  const filtrando=!!(mesSel||txt||ambSel);
+  const hayNegocio=arr.some(m=>ambitoDe(m)==='negocio');
 
   const barraFiltros=`
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:-4px 0 14px">
@@ -1740,7 +1842,14 @@ function renderMovList(tipo){
         <input class="icone-input" id="filtro-txt-${tipo}" value="${esc(_filtroTexto[tipo])}"
           placeholder="nota, categoría, cuenta…" onchange="cambiarFiltroTexto('${tipo}',this.value)">
       </div>
-      ${filtrando?`<button class="btn btn-ghost btn-sm" onclick="cambiarFiltroMes('${tipo}','');cambiarFiltroTexto('${tipo}','')">Quitar filtros</button>`:''}
+      ${hayNegocio?`<div class="field" style="min-width:150px">
+        <label for="filtro-amb-${tipo}">Ámbito</label>
+        <select class="icone-select" id="filtro-amb-${tipo}" onchange="cambiarFiltroAmbito('${tipo}',this.value)">
+          <option value="">Personal y negocio</option>
+          ${AMBITOS.map(a=>`<option value="${a.id}" ${a.id===ambSel?'selected':''}>${a.icono} Solo ${a.etiqueta.toLowerCase()}</option>`).join('')}
+        </select>
+      </div>`:''}
+      ${filtrando?`<button class="btn btn-ghost btn-sm" onclick="_filtroAmbito['${tipo}']='';cambiarFiltroMes('${tipo}','');cambiarFiltroTexto('${tipo}','')">Quitar filtros</button>`:''}
     </div>
     ${filtrando?`<div style="margin:-6px 0 12px;font-size:.88rem;color:var(--muted)">
       <b style="color:#fff">${visibles.length}</b> de ${arr.length} movimiento(s) ·
@@ -1759,7 +1868,7 @@ function renderMovList(tipo){
     <div class="card" style="margin-top:18px"><h3>📋 Movimientos</h3>
       ${barraFiltros}
       ${visibles.length?`<div class="table-wrap"><table><thead><tr><th>Fecha del gasto</th><th>Categoría</th><th>${tipo==='ing'?'Fuente':'Método'}</th><th>Nota</th><th>Recibos</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
-        ${[...visibles].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td><div style="font-weight:600">${fmtDate(m.fecha)}</div>${fechaAnotado(m)&&fechaAnotado(m)!==m.fecha?`<div style="color:var(--muted);font-size:.7rem;margin-top:2px">anotado el ${fmtDate(fechaAnotado(m))}</div>`:''}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${esc(m.categoria)}</span>${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${esc(m.subcategoria)}</div>`:''}</td><td>${esc(tipo==='ing'?(m.fuente||'—'):(m.metodo||'—'))}${m.cuentaId&&nombreCuenta(m.cuentaId)?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">🏦 ${esc(nombreCuenta(m.cuentaId))}</div>`:''}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.nota||'—')}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')" aria-label="Editar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')" aria-label="Eliminar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">🗑</button></td></tr>`).join('')}
+        ${[...visibles].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td><div style="font-weight:600">${fmtDate(m.fecha)}</div>${fechaAnotado(m)&&fechaAnotado(m)!==m.fecha?`<div style="color:var(--muted);font-size:.7rem;margin-top:2px">anotado el ${fmtDate(fechaAnotado(m))}</div>`:''}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${esc(m.categoria)}</span>${ambitoDe(m)==='negocio'?' <span class="badge negocio">💼 Negocio</span>':''}${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${esc(m.subcategoria)}</div>`:''}</td><td>${esc(tipo==='ing'?(m.fuente||'—'):(m.metodo||'—'))}${m.cuentaId&&nombreCuenta(m.cuentaId)?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">🏦 ${esc(nombreCuenta(m.cuentaId))}</div>`:''}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.nota||'—')}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')" aria-label="Editar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')" aria-label="Eliminar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">🗑</button></td></tr>`).join('')}
       </tbody></table></div>`:(arr.length
         ?`<div class="empty"><div class="empty-icon">🔍</div>Ningún movimiento coincide con el filtro.</div>`
         :`<div class="empty"><div class="empty-icon">${tipo==='ing'?'💵':'💸'}</div>No hay ${tipo==='ing'?'ingresos':'egresos'} registrados</div>`)}
@@ -1848,7 +1957,7 @@ function formMov(tipo,id){
   const arr=tipo==='ing'?S.ingresos:S.egresos;
   const cats=tipo==='ing'?S.catIngreso:S.catEgreso;
   const ultima=(tipo==='ing'?S.config.ultimaCuentaIng:S.config.ultimaCuentaEg)||'';
-  const m=id?arr.find(x=>x.id===id):{fecha:today(),monto:'',categoria:cats[0],fuente:'',metodo:S.metodos[0],cuentaId:ultima,nota:'',recibos:[]};
+  const m=id?arr.find(x=>x.id===id):{fecha:today(),monto:'',categoria:cats[0],fuente:'',metodo:S.metodos[0],cuentaId:ultima,nota:'',recibos:[],ambito:ultimoAmbito(tipo)};
   /* Las dos listas se vacían al ABRIR el formulario, no solo al guardarlo.
      _removedExisting solo se limpiaba al final de saveMov, así que si
      quitabas un recibo y cancelabas, el id quedaba en la lista y el
@@ -1862,6 +1971,7 @@ function formMov(tipo,id){
       ${tipo==='ing'?`<div class="field"><label>Fuente</label><input class="icone-input" id="f-fuente" value="${esc(m.fuente)}" placeholder="Empresa, cliente..."></div>`:`<div class="field"><label>Método de pago</label><select class="icone-select" id="f-metodo">${S.metodos.map(x=>`<option ${m.metodo===x?'selected':''}>${esc(x)}</option>`).join('')}</select></div>`}
     </div>
     ${tipo==='eg'?`<div class="field" style="margin-top:12px"><label>Subcategoría</label>${campoSubcat(m.categoria,m.subcategoria,'100%')}</div>`:''}
+    ${campoAmbito(ambitoDe(m))}
     ${campoCuenta(m.cuentaId||'',tipo)}
     <div class="field" style="margin-top:12px"><label>Nota</label><textarea class="icone-input" id="f-nota" rows="2" placeholder="Detalle...">${esc(m.nota)}</textarea></div>
     <div class="field" style="margin-top:14px">
@@ -1918,8 +2028,10 @@ async function saveMov(tipo,id){
   const data={
     fecha,
     monto,categoria:document.getElementById('f-cat').value,
-    nota:document.getElementById('f-nota').value.trim()
+    nota:document.getElementById('f-nota').value.trim(),
+    ambito:valorAmbito()
   };
+  recordarAmbito(tipo,data.ambito);
   if(tipo==='ing')data.fuente=document.getElementById('f-fuente').value.trim();
   else{
     data.metodo=document.getElementById('f-metodo').value;
@@ -2038,7 +2150,7 @@ function esquemaFactura(){
     // El orden importa: al exigir `establecimiento` primero, el modelo tiene
     // que razonar el giro del negocio ANTES de mirar los ítems. Ese análisis
     // se convierte en el prior con el que luego revisa línea por línea.
-    required:['establecimiento','tipo_documento','fecha','total_documento','confianza','nota','items'],
+    required:['establecimiento','tipo_documento','ambito_probable','fecha','total_documento','confianza','nota','items'],
     properties:{
       establecimiento:{type:'object',additionalProperties:false,
         required:['nombre','giro','categoria_probable','razon'],
@@ -2049,6 +2161,7 @@ function esquemaFactura(){
           razon:{type:'string',description:'Una frase corta explicando por qué ese giro implica esa división.'}
         }},
       tipo_documento:{type:'string',enum:['factura','recibo','pantallazo_movimientos','extracto','otro']},
+      ambito_probable:{type:'string',enum:['personal','negocio'],description:'negocio si el documento es un gasto de la actividad profesional (software, suscripciones de trabajo, publicidad, insumos, viaje o comida con un cliente); personal en cualquier otro caso, y ante la duda.'},
       fecha:{type:'string',description:'Fecha del documento en formato YYYY-MM-DD. "" si no aparece.'},
       total_documento:{type:'number',description:'Total impreso en el documento. 0 si no aparece.'},
       confianza:{type:'string',enum:['alta','media','baja']},
@@ -2086,6 +2199,15 @@ Cuándo el ítem se SALE a otra división:
 - Lo mismo aplica en menor escala: una droguería que vende maquillaje mezcla "Salud" con "Cuidado personal y otros"; un supermercado que vende licor mezcla "Mercado y bebidas" con "Alcohol y tabaco".
 
 Cuando dudes entre dos divisiones, decide por la FINALIDAD del gasto, no por la naturaleza del producto. Es el criterio de COICOP: la misma cerveza es "Alcohol y tabaco" comprada en la tienda y "Restaurantes y alojamiento" tomada en un bar.
+
+═══ PERSONAL O DEL NEGOCIO ═══
+Esta persona es profesional independiente en Colombia: factura por cuenta de cobro y también tiene su vida personal. En "ambito_probable" di si el documento entero es un gasto de la actividad profesional o de la vida personal.
+
+Es de NEGOCIO cuando el gasto solo existe porque hay una actividad profesional detrás: suscripciones de software y de IA, servicios en la nube, dominios y hosting, publicidad, papelería y equipos de trabajo, cursos y libros de la especialidad, comida o transporte de una reunión con un cliente, comisiones de facturación.
+
+Es PERSONAL todo lo demás: mercado, arriendo, colegio, salud, ropa, ocio familiar, servicios del hogar.
+
+Ante la duda, personal. Es más fácil de corregir que un gasto personal colado en las cuentas del negocio.
 
 ═══ SUBCATEGORÍA ═══
 Además de la división, dale a cada ítem una subcategoría corta y concreta que describa el gasto en lenguaje cotidiano: 1 a 3 palabras, en minúscula salvo nombres propios. "mercado semanal", "salida en pareja", "gasolina", "hotel familiar", "medicamentos", "regalo cumpleaños". Te pasaré las subcategorías que esta persona ya viene usando: REUTILIZA una existente siempre que describa bien el gasto, y solo inventa una nueva cuando ninguna encaje. Es su vocabulario, no el tuyo — la idea es que con el tiempo se parezca a su vida y no a un catálogo genérico.
@@ -2225,6 +2347,9 @@ function renderRevisionEscaneo(){
   }
 
   const E=R.establecimiento||{};
+  /* La IA propone el ámbito leyendo el documento; si no se pronuncia, se
+     cae en el último que usaste, que suele ser el correcto. */
+  const ambitoSugerido=R.ambito_probable==='negocio'?'negocio':(R.ambito_probable==='personal'?'personal':ultimoAmbito('eg'));
   const opcionesCat=(sel)=>COICOP.map(c=>`<option ${sel===c.nombre?'selected':''}>${esc(c.nombre)}</option>`).join('');
 
   const filas=items.map(it=>{
@@ -2279,6 +2404,7 @@ function renderRevisionEscaneo(){
         <div class="field" style="flex:1;min-width:150px"><label>Subcategoría</label>${campoSubcat('','','150px')}</div>
       </div>
     </div>
+    ${campoAmbito(ambitoSugerido,'esc-ambito')}
     ${selectCuentaLote('esc-cuenta','¿De qué cuenta salió esta factura?','recalcEscaneo()')}
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
@@ -2376,20 +2502,22 @@ async function guardarEscaneo(){
   const pre=comercio?comercio+' · ':'';
   const agrupar=document.getElementById('esc-agrupar').checked;
   const cuentaId=valorCuentaLote('esc-cuenta');
+  const ambito=valorAmbito('esc-ambito');
+  recordarAmbito('eg',ambito);
   if(agrupar){
     // Un solo gasto = una sola categoría: la que elegiste arriba, no la de la
     // primera fila. Por defecto viene propuesta la que más pesa en la factura.
     const cat=document.getElementById('esc-grupo-cat').value;
     const sub=valorSubcat(document.querySelector('#esc-grupo .sub-wrap'));
     S.egresos.push({id:uid(),fecha:datos[0].fecha,monto:datos.reduce((a,b)=>a+b.monto,0),
-      categoria:cat,subcategoria:sub,metodo:datos[0].metodo,cuentaId,
+      categoria:cat,subcategoria:sub,metodo:datos[0].metodo,cuentaId,ambito,
       nota:(pre+datos.map(d=>d.descripcion).join(', ')).slice(0,300),recibos:[rec.id],
       createdAt:new Date().toISOString()});
     aprenderSubcategoria(cat,sub);
   }else{
     datos.forEach(d=>{
       S.egresos.push({id:uid(),fecha:d.fecha,monto:d.monto,categoria:d.categoria,
-        subcategoria:d.subcategoria,metodo:d.metodo,cuentaId,nota:pre+d.descripcion,recibos:[rec.id],
+        subcategoria:d.subcategoria,metodo:d.metodo,cuentaId,ambito,nota:pre+d.descripcion,recibos:[rec.id],
         createdAt:new Date().toISOString()});
       aprenderSubcategoria(d.categoria,d.subcategoria);
     });
@@ -2430,13 +2558,17 @@ Si menciona un almacén de todo como Alkosto o Éxito, decide por el producto qu
 
 Dale a cada egreso una subcategoría corta. Te paso las que ya usa: reutiliza la que encaje antes de inventar una.
 
+═══ PERSONAL O DEL NEGOCIO ═══
+Es profesional independiente: factura por cuenta de cobro y además tiene su vida personal. En "ambito_probable" di si lo que dictó pertenece a la actividad profesional o a la vida personal. Es de NEGOCIO si menciona un cliente, una herramienta de trabajo, una suscripción de software o IA, publicidad, o el cobro de un servicio suyo. Es PERSONAL el resto. Ante la duda, personal.
+
 Si algo quedó ambiguo — un monto que no se entendió, un gasto sin cifra — no lo inventes: omítelo y dilo en "nota", con confianza baja. En "entendido" escribe en una frase qué interpretaste, para que la persona confirme.`;
 
 function esquemaVoz(){
   return {type:'object',additionalProperties:false,
-    required:['entendido','confianza','nota','ingresos','egresos'],
+    required:['entendido','confianza','nota','ambito_probable','ingresos','egresos'],
     properties:{
       entendido:{type:'string',description:'Una frase con lo que interpretaste.'},
+      ambito_probable:{type:'string',enum:['personal','negocio'],description:'negocio si lo dictado es de la actividad profesional (un cliente, una herramienta de trabajo, una factura emitida); personal en cualquier otro caso, y ante la duda.'},
       confianza:{type:'string',enum:['alta','media','baja']},
       nota:{type:'string',description:'Qué quedó ambiguo. "" si todo claro.'},
       ingresos:{type:'array',items:{type:'object',additionalProperties:false,
@@ -2643,6 +2775,7 @@ function renderRevisionVoz(R,texto,segs){
       <tbody>${cuerpo}</tbody></table>
     </div>
     <div id="vz-resumen" style="margin-top:12px;font-size:.88rem"></div>
+    ${campoAmbito(R.ambito_probable==='negocio'?'negocio':ultimoAmbito('eg'),'vz-ambito')}
     ${selectCuentaLote('vz-cuenta','¿Qué cuenta se movió?')}
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
@@ -2692,12 +2825,14 @@ function guardarVoz(){
   const sel=[...document.querySelectorAll('#vz-tabla tbody tr')].filter(tr=>tr.querySelector('.vz-chk').checked);
   let nIng=0,nEg=0;
   const cuentaId=valorCuentaLote('vz-cuenta');
+  const ambito=valorAmbito('vz-ambito');
+  recordarAmbito('eg',ambito);
   sel.forEach(tr=>{
     const monto=parseFloat(tr.querySelector('.vz-monto').value)||0;
     if(monto<=0)return;
     const base={id:uid(),fecha:tr.querySelector('.vz-fecha').value||today(),monto,
       categoria:tr.querySelector('.vz-cat').value,
-      nota:tr.querySelector('.vz-desc').value.trim(),cuentaId,recibos:[],
+      nota:tr.querySelector('.vz-desc').value.trim(),cuentaId,ambito,recibos:[],
       createdAt:new Date().toISOString()};
     if(tr.dataset.tipo==='ing'){
       S.ingresos.push({...base,fuente:''});nIng++;
@@ -2967,6 +3102,19 @@ function renderConfig(){
       <div id="rec-sync-conteo" style="margin-top:10px;font-size:.82rem;color:var(--muted)"></div>
     </div>
 
+    <div class="card" style="margin-bottom:18px">
+      <h3>💼 Separar tu historia entre personal y negocio</h3>
+      <p style="color:var(--muted);font-size:.9rem;margin-bottom:12px">
+        Desde ahora cada movimiento nuevo nace marcado. Los que ya tenías no: se leen como
+        personales. Esto busca entre ellos los que tienen pinta de ser de la actividad
+        profesional y te los muestra para que confirmes de una.
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-primary" onclick="revisarAmbitoHistorico()">🔎 Buscar gastos del negocio</button>
+        <span style="font-size:.86rem;color:var(--muted)">${S.egresos.filter(e=>ambitoDe(e)==='negocio').length+S.ingresos.filter(e=>ambitoDe(e)==='negocio').length} movimiento(s) marcados como negocio</span>
+      </div>
+    </div>
+
     <div class="card" style="margin-bottom:18px;border:1px solid rgba(255,140,0,.3)">
       <h3>🔄 ¿Algo no se guarda o se ve raro?</h3>
       <p style="color:var(--muted);font-size:.9rem;margin-bottom:14px">Borra la copia guardada en este dispositivo y la vuelve a bajar de la nube. Úsalo solo si algo se ve desactualizado y refrescar no lo arregla. <b>Si no has iniciado sesión, la app queda vacía.</b></p>
@@ -3010,6 +3158,87 @@ function renderConfig(){
   `;
   contarRecibosPendientes();
 }
+/* ── Separar la historia vieja ──────────────────────────────
+   Marcar 285 movimientos a mano no lo hace nadie, así que la app propone.
+   La búsqueda es por palabras, no por IA: es instantánea, gratis y
+   verificable — se ve exactamente por qué cada gasto quedó propuesto.
+   Tú decides uno por uno; nada se marca sin tu visto bueno. */
+const PISTAS_NEGOCIO=[
+  'claude','anthropic','openai','chatgpt','gemini','midjourney','copilot',
+  'canva','adobe','figma','notion','github','vercel','netlify','cloudflare',
+  'hosting','dominio','subdominio','servidor','api ','supabase','workspace',
+  'zoom','meet','calendly','mailchimp','suscrip','licencia','software',
+  'icone','ialabs','cliente','asesor','consultor','capacit','diplomado',
+  'publicidad','pauta','ads','tarjeta de present','factura electr'
+];
+function pistasDe(m){
+  const t=((m.nota||'')+' '+(m.subcategoria||'')+' '+(m.fuente||'')).toLowerCase();
+  return PISTAS_NEGOCIO.filter(p=>t.includes(p));
+}
+let _ambitoProp=null;
+
+function revisarAmbitoHistorico(){
+  const cands=[];
+  const mirar=(arr,tipo)=>arr.forEach(m=>{
+    if(ambitoDe(m)==='negocio')return;          // ya está marcado
+    const p=pistasDe(m);
+    if(p.length)cands.push({m,tipo,pistas:p});
+  });
+  mirar(S.egresos,'eg');mirar(S.ingresos,'ing');
+  _ambitoProp=cands;
+
+  if(!cands.length){
+    return openModal(`<h2>Nada nuevo que proponer</h2>
+      <p style="color:var(--muted);margin:12px 0">No encontré movimientos sin marcar que suenen a la actividad profesional.
+      Si sabes de alguno, márcalo abriéndolo desde la lista.</p>
+      <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-primary" onclick="closeModal()">Listo</button></div>`);
+  }
+  const total=cands.reduce((a,c)=>a+c.m.monto,0);
+  openModal(`<h2>💼 ${cands.length} movimiento(s) con pinta de negocio</h2>
+    <p style="color:var(--muted);font-size:.88rem;margin:8px 0 12px">
+      Suman ${fmtCOP(total)}. Desmarca los que en realidad sean personales. Lo que dejes marcado
+      pasa a ámbito <b>negocio</b>; el resto se queda como está.
+    </p>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="btn btn-ghost btn-sm" onclick="marcarTodoAmbito(true)">Marcar todos</button>
+      <button class="btn btn-ghost btn-sm" onclick="marcarTodoAmbito(false)">Ninguno</button>
+    </div>
+    <div class="table-wrap" id="amb-tabla" style="max-height:46vh;overflow:auto">
+      <table><thead><tr><th></th><th>Movimiento</th><th>Por qué</th><th style="text-align:right">Monto</th></tr></thead><tbody>
+      ${cands.map((c,i)=>`<tr data-i="${i}">
+        <td><input type="checkbox" class="amb-chk" checked></td>
+        <td style="max-width:210px">
+          <div>${esc((c.m.nota||c.m.subcategoria||'—').slice(0,58))}</div>
+          <div style="color:var(--muted);font-size:.74rem">${fmtDate(c.m.fecha)} · ${esc(c.m.categoria)} · ${c.tipo==='ing'?'ingreso':'egreso'}</div>
+        </td>
+        <td style="font-size:.76rem;color:var(--muted)">${esc(c.pistas.slice(0,3).join(', '))}</td>
+        <td style="text-align:right" class="amount ${c.tipo==='ing'?'pos':'neg'}">${fmtCOP(c.m.monto)}</td>
+      </tr>`).join('')}
+      </tbody></table>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="aplicarAmbitoHistorico()">Marcar como negocio</button>
+    </div>`);
+}
+
+function marcarTodoAmbito(v){
+  document.querySelectorAll('#amb-tabla .amb-chk').forEach(c=>c.checked=v);
+}
+
+function aplicarAmbitoHistorico(){
+  let n=0;
+  document.querySelectorAll('#amb-tabla tbody tr').forEach(tr=>{
+    if(!tr.querySelector('.amb-chk').checked)return;
+    const c=_ambitoProp[+tr.dataset.i];
+    if(!c)return;
+    c.m.ambito='negocio';n++;
+  });
+  _ambitoProp=null;
+  saveState();closeModal();rerender();
+  toast(`✓ ${n} movimiento(s) marcados como negocio`);
+}
+
 /* Cuántas fotos hay en este dispositivo y cuántas ya tienen copia en el
    servidor. Se pinta después del render porque leer IndexedDB es asíncrono. */
 async function contarRecibosPendientes(){
