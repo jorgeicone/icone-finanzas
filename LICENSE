@@ -1,0 +1,64 @@
+Copyright © 2026 Jorge Hugo Pérez Gaona — ICONE ialabs
+Todos los derechos reservados. / All rights reserved.
+
+ICONE FINANZAS
+Aplicación de gestión financiera personal.
+https://github.com/jorgeicone/icone-finanzas
+
+
+LICENCIA DE USO — PROPIETARIA
+
+Este software y todo su contenido —código fuente, diseño de interfaz,
+textos, taxonomía de clasificación aplicada, instrucciones de sistema para
+modelos de lenguaje, imágenes e identidad visual— son obra original de
+Jorge Hugo Pérez Gaona y están protegidos por la Ley 23 de 1982 y la
+Decisión Andina 351 de 1993 sobre derecho de autor, así como por los
+tratados internacionales aplicables.
+
+El repositorio es de acceso público únicamente para permitir su publicación
+mediante GitHub Pages. Acceso público NO significa licencia libre.
+
+NO SE AUTORIZA, sin permiso previo, expreso y por escrito del titular:
+
+  1. Copiar, reproducir o redistribuir el código, total o parcialmente.
+  2. Crear obras derivadas, adaptaciones o versiones modificadas.
+  3. Usar el software con fines comerciales, ni incorporarlo a productos
+     o servicios propios o de terceros.
+  4. Reutilizar la identidad visual, el nombre «ICONE», «ICONE ialabs» o
+     «ICONE Finanzas», ni sus logotipos.
+  5. Extraer o reutilizar las instrucciones de sistema y los esquemas de
+     salida diseñados para la lectura de facturas y el dictado por voz.
+
+SÍ SE PERMITE, sin autorización previa:
+
+  1. Consultar el código con fines de estudio o auditoría personal.
+  2. Citar fragmentos breves con atribución explícita al autor y enlace
+     al repositorio original.
+
+
+DATOS PERSONALES
+
+Esta aplicación procesa información financiera de su usuario. Los datos se
+guardan en el navegador del propio dispositivo y, si se inicia sesión, en
+la cuenta de Supabase del titular, protegidos por políticas de seguridad a
+nivel de fila. El autor no recoge, comercializa ni cede datos de terceros.
+
+Las imágenes de facturas que el usuario decide escanear se envían a la API
+de Anthropic a través de una función intermedia propia, con el único fin de
+extraer y clasificar los gastos de esa imagen.
+
+
+SIN GARANTÍA
+
+El software se entrega «tal cual», sin garantía de ningún tipo, expresa o
+implícita. Las cifras, proyecciones y clasificaciones que presenta son una
+ayuda de organización personal y NO constituyen asesoría financiera,
+contable ni tributaria. El autor no será responsable por decisiones
+tomadas con base en ellas, ni por pérdida de datos, lucro cesante o daños
+de cualquier naturaleza derivados del uso de la aplicación.
+
+
+CONTACTO PARA AUTORIZACIONES
+
+Jorge Hugo Pérez Gaona — ICONE ialabs
+https://iconeialabs.com

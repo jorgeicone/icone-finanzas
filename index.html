@@ -3,10 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
+<!-- Aquí vivían tres <meta http-equiv> de caché. Los navegadores ignoran
+     esas directivas en meta: solo cuentan como cabeceras HTTP, y GitHub
+     Pages no las manda. Lo que de verdad rompe la caché es el ?v= de la
+     URL, que sube con cada versión. -->
 <meta name="theme-color" content="#050d1f">
+<meta name="description" content="Gestión financiera personal con clasificación COICOP 2018, lectura de facturas por IA y sincronización entre dispositivos.">
+<meta name="author" content="Jorge Hugo Pérez Gaona — ICONE ialabs">
+<meta name="copyright" content="© 2026 Jorge Hugo Pérez Gaona. Todos los derechos reservados.">
 <title>ICONE Finanzas | Gestión Financiera Personal</title>
 <!-- El SVG es el maestro: el navegador lo escala sin que el signo $ se
      empaste a 16px. Los PNG quedan de respaldo para navegadores viejos y
@@ -278,8 +282,9 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </div>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.27</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.28</b></div>
       <div style="margin-top:2px">Build 2026-09-02</div>
+      <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
   </aside>
 
@@ -314,11 +319,33 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
 <script>
 /* ============================================================
    ICONE FINANZAS — Aplicación financiera personal modular
+
+   Copyright © 2026 Jorge Hugo Pérez Gaona — ICONE ialabs
+   Todos los derechos reservados.
+
+   Obra protegida por la Ley 23 de 1982 y la Decisión Andina 351 de 1993.
+   El repositorio es público solo para poder publicarse en GitHub Pages;
+   eso no lo convierte en software libre. Condiciones completas en el
+   archivo LICENSE. Copiar, adaptar o usar comercialmente este código
+   requiere autorización previa y por escrito del autor.
+
    Datos: localStorage (key: iconeFinanzas)
    Recibos: IndexedDB (DB: iconeFinanzasDB, store: recibos)
    ============================================================ */
 
 const STORE_KEY='iconeFinanzas';
+
+/* Escapa texto antes de meterlo en una plantilla HTML.
+   Todo el render de esta app es innerHTML con plantillas, y ahí entran dos
+   clases de texto que no controlamos: lo que tú escribes (el alias de una
+   cuenta, la nota de un gasto) y lo que devuelve la IA al leer una foto —
+   que en el fondo es texto impreso en un papel ajeno. Sin escapar, un
+   simple «<» rompe la tabla, y algo peor la convierte en un vector de
+   inyección dentro de la app donde están tus saldos.
+   Cubre atributos además de texto: por eso también ' y ". */
+const esc=v=>String(v==null?'':v)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const fmtCOP=n=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n||0);
 const fmtDate=d=>{if(!d)return'—';const x=new Date(d+'T00:00');return x.toLocaleDateString('es-CO',{day:'2-digit',month:'short',year:'numeric'})};
 const fmtMonth=ym=>{const[y,m]=ym.split('-');return new Date(y,m-1,1).toLocaleDateString('es-CO',{month:'short',year:'2-digit'})};
@@ -448,7 +475,7 @@ function opcionesSubcat(cat,sel){
   const guardadas=(S.subcatEgreso&&S.subcatEgreso[cat])||[];
   const lista=[...new Set([...guardadas,...(sel?[sel]:[])])].sort((a,b)=>a.localeCompare(b,'es'));
   return `<option value="">— sin subcategoría —</option>`
-    +lista.map(s=>`<option value="${s.replace(/"/g,'&quot;')}" ${s===sel?'selected':''}>${s}</option>`).join('')
+    +lista.map(s=>`<option value="${esc(s)}" ${s===sel?'selected':''}>${esc(s)}</option>`).join('')
     +`<option value="__nueva__">➕ Crear nueva…</option>`;
 }
 function campoSubcat(cat,sel,ancho='130px'){
@@ -553,6 +580,14 @@ async function initSupabase(){
   if(currentUser){await pullFromCloud()}else{setSyncStatus('local')}
 }
 
+/* Cuántos registros trae un estado, de verdad.
+   La comparación anterior solo contaba S.saldos, así que un celular con tres
+   egresos nuevos y los mismos cortes empataba con el PC y perdía los tres. */
+function contarRegistros(e){
+  const n=k=>Array.isArray(e&&e[k])?e[k].length:0;
+  return n('saldos')+n('ingresos')+n('egresos')+n('traslados');
+}
+
 async function pullFromCloud(forceOverwrite=false){
   if(!currentUser||!sb)return;
   setSyncStatus('pulling');
@@ -560,38 +595,96 @@ async function pullFromCloud(forceOverwrite=false){
   try{
     const {data,error}=await sb.from('finanzas_data').select('*').eq('user_id',currentUser.id).maybeSingle();
     if(error)throw error;
-    if(data&&data.data&&Object.keys(data.data).length){
-      // Comparar timestamps — solo bajar si la nube es MÁS NUEVA que lo local
-      const cloudTs=new Date(data.updated_at).getTime();
-      const localTs=parseInt(localStorage.getItem(STORE_KEY+'_ts')||'0');
-      const localSaldos=(S.saldos||[]).length;
-      const cloudSaldos=(data.data.saldos||[]).length;
 
-      if(!forceOverwrite && localTs>cloudTs && localSaldos>=cloudSaldos){
-        // Local es más nuevo Y tiene al menos los mismos registros → subimos en vez de bajar
+    if(!(data&&data.data&&Object.keys(data.data).length)){
+      /* Primera vez con este usuario: la nube está vacía y manda lo local.
+         Ojo con isPulling: pushToCloud se niega a correr mientras esté en
+         true, así que antes esta subida —y la de más abajo— nunca ocurrían.
+         La app incluso anunciaba «subimos a la nube» sin haber subido. */
+      isPulling=false;
+      await pushToCloud();
+      return;
+    }
+
+    const cloudTs=new Date(data.updated_at).getTime();
+    const localTs=parseInt(localStorage.getItem(STORE_KEY+'_ts')||'0');
+    const nLocal=contarRegistros(S), nCloud=contarRegistros(data.data);
+
+    if(!forceOverwrite){
+      // Este dispositivo va adelante y bajar no le quitaría nada: sube.
+      if(localTs>cloudTs && nLocal>=nCloud){
+        isPulling=false;
         await pushToCloud();
-        toast('⬆️ Local es más reciente: subimos a la nube');
+        toast('⬆️ Este dispositivo iba adelante: se subió a la nube');
         return;
       }
-
-      S={...S,...data.data};
-      normalizeState();
-      modulesCustom=data.modules||[];
-      migrarTaxonomia();   // los datos de la nube pueden venir con la taxonomía vieja
-      localStorage.setItem(STORE_KEY,JSON.stringify(S));
-      localStorage.setItem(STORE_KEY+'_modules',JSON.stringify(modulesCustom));
-      localStorage.setItem(STORE_KEY+'_ts',cloudTs.toString());
-      rerender();
-      setSyncStatus('synced','Actualizado '+new Date(data.updated_at).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}));
-      toast('☁️ Datos descargados de la nube');
-    }else{
-      // Primera vez con este usuario — subimos lo local
-      await pushToCloud();
+      /* Bajar borraría registros que solo existen aquí. Antes se hacía en
+         silencio, y así es como desaparecían movimientos recién anotados.
+         La app ya no elige por ti: pregunta cuál de las dos versiones vale. */
+      if(nCloud<nLocal){
+        isPulling=false;
+        return avisarConflicto(data,nLocal,nCloud,cloudTs);
+      }
     }
+
+    aplicarEstadoDeLaNube(data,cloudTs);
+    toast('☁️ Datos descargados de la nube');
   }catch(err){
     console.error('Pull error:',err);
     setSyncStatus('error',err.message);
   }finally{isPulling=false}
+}
+
+function aplicarEstadoDeLaNube(data,cloudTs){
+  S={...S,...data.data};
+  normalizeState();
+  modulesCustom=data.modules||[];
+  migrarTaxonomia();   // los datos de la nube pueden venir con la taxonomía vieja
+  localStorage.setItem(STORE_KEY,JSON.stringify(S));
+  localStorage.setItem(STORE_KEY+'_modules',JSON.stringify(modulesCustom));
+  localStorage.setItem(STORE_KEY+'_ts',cloudTs.toString());
+  rerender();
+  setSyncStatus('synced','Actualizado '+new Date(cloudTs).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}));
+}
+
+/* Los dos lados avanzaron por caminos distintos y no hay manera de saber
+   cuál quieres sin preguntar. Se muestran las dos cuentas de registros para
+   que la decisión se tome mirando números, no adivinando. */
+let _conflicto=null;
+function avisarConflicto(data,nLocal,nCloud,cloudTs){
+  _conflicto={data,cloudTs};
+  setSyncStatus('error','Hay dos versiones distintas');
+  openModal(`<h2>⚠️ Dos versiones distintas de tus datos</h2>
+    <p style="color:var(--muted);font-size:.9rem;line-height:1.6;margin-bottom:14px">
+      La copia de la nube es más reciente, pero tiene <b>menos registros</b> que la de este
+      dispositivo. Suele pasar cuando anotaste algo aquí y otro aparato subió su versión después.
+      Elige tú: bajar la de la nube borraría lo que solo existe aquí.
+    </p>
+    <div class="proy-box" style="margin-bottom:14px">
+      <div><span class="k">En este dispositivo</span><span class="amount">${nLocal} registro(s)</span></div>
+      <div><span class="k">En la nube</span><span class="amount">${nCloud} registro(s)</span></div>
+      <div style="border-top:1px solid rgba(255,255,255,.14);padding-top:7px;margin-top:2px">
+        <span class="k">Se perderían al bajar</span><span class="amount neg">${nLocal-nCloud}</span></div>
+    </div>
+    <p style="color:var(--muted);font-size:.78rem;line-height:1.5">
+      Pase lo que pase, la versión anterior queda guardada en el historial de respaldos de la nube.
+    </p>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="resolverConflicto('nube')">Traer la de la nube</button>
+      <button class="btn btn-primary" onclick="resolverConflicto('local')">Conservar la de aquí y subirla</button>
+    </div>`);
+}
+
+async function resolverConflicto(cual){
+  const c=_conflicto;_conflicto=null;closeModal();
+  if(!c)return;
+  if(cual==='nube'){
+    aplicarEstadoDeLaNube(c.data,c.cloudTs);
+    toast('☁️ Se aplicó la versión de la nube');
+  }else{
+    await pushToCloud();
+    toast('⬆️ Se conservó lo de este dispositivo');
+  }
 }
 
 async function pushToCloud(){
@@ -657,7 +750,7 @@ async function sendMagicLink(){
   const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
   if(error){toast('Error: '+error.message,'error');setSyncStatus('local');return}
   toast('✉️ Revisa tu email y haz click en el link');
-  document.getElementById('login-status').innerHTML=`<div style="background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.3);border-radius:12px;padding:14px;margin-top:14px;font-size:.88rem">📧 Te envié un link de acceso a <b>${email}</b>. Ábrelo y volverás aquí ya logueado. <br><br><b>Tip:</b> abre el link en el mismo navegador donde estás ahora.</div>`;
+  document.getElementById('login-status').innerHTML=`<div style="background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.3);border-radius:12px;padding:14px;margin-top:14px;font-size:.88rem">📧 Te envié un link de acceso a <b>${esc(email)}</b>. Ábrelo y volverás aquí ya logueado. <br><br><b>Tip:</b> abre el link en el mismo navegador donde estás ahora.</div>`;
 }
 
 async function loginWithPassword(){
@@ -795,7 +888,7 @@ registerModule({
 
       <div>
         <div class="card"><h3>🕒 Últimos movimientos</h3>
-          ${ultimos.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Categoría</th><th style="text-align:right">Monto</th></tr></thead><tbody>${ultimos.map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${m.tipo==='ing'?'green':'orange'}">${m.tipo==='ing'?'Ingreso':'Egreso'}</span></td><td>${m.categoria||'—'}</td><td style="text-align:right" class="amount ${m.tipo==='ing'?'pos':'neg'}">${m.tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="empty-icon">📭</div>Aún no hay movimientos. Empieza registrando un ingreso o un egreso.</div>`}
+          ${ultimos.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Categoría</th><th style="text-align:right">Monto</th></tr></thead><tbody>${ultimos.map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${m.tipo==='ing'?'green':'orange'}">${m.tipo==='ing'?'Ingreso':'Egreso'}</span></td><td>${esc(m.categoria||'—')}</td><td style="text-align:right" class="amount ${m.tipo==='ing'?'pos':'neg'}">${m.tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="empty"><div class="empty-icon">📭</div>Aún no hay movimientos. Empieza registrando un ingreso o un egreso.</div>`}
         </div>
       </div>
     `;
@@ -854,7 +947,7 @@ function selectCuentaLote(id,label){
   return `<div class="field" style="margin-top:14px"><label>${label}</label>
     <select class="icone-select" id="${id}">
       <option value="">— Sin especificar —</option>
-      ${S.cuentas.map(c=>`<option value="${c.id}" ${S.config.ultimaCuentaEg===c.id?'selected':''}>${c.alias||c.banco}</option>`).join('')}
+      ${S.cuentas.map(c=>`<option value="${c.id}" ${S.config.ultimaCuentaEg===c.id?'selected':''}>${esc(c.alias||c.banco)}</option>`).join('')}
     </select></div>`;
 }
 function valorCuentaLote(id){
@@ -1000,7 +1093,20 @@ function renderDashboardCharts(){
   if(ctx1){
     const allDates=[...new Set(S.saldos.map(s=>s.fecha))].sort();
     const datasets=S.cuentas.map((c,i)=>{
-      const series=allDates.map(f=>{const reg=getUltimoSaldo(c.id,f);return reg?reg.monto:null});
+      /* Antes esto llamaba a getUltimoSaldo por cada fecha del eje, y esa
+         función recorre TODO S.saldos: con 9 cuentas y 40 fechas eran
+         decenas de miles de vueltas para dibujar una línea. Ahora se
+         recorren los cortes de la cuenta una sola vez, arrastrando el
+         último conocido. Mismo criterio de desempate: gana el insertado
+         después cuando dos cortes comparten fecha. */
+      const propios=S.saldos.map((s,idx)=>({s,idx}))
+        .filter(x=>x.s.cuentaId===c.id)
+        .sort((a,b)=>a.s.fecha.localeCompare(b.s.fecha)||a.idx-b.idx);
+      let p=0,ultimo=null;
+      const series=allDates.map(f=>{
+        while(p<propios.length&&propios[p].s.fecha<=f){ultimo=propios[p].s;p++}
+        return ultimo?ultimo.monto:null;
+      });
       return {label:c.alias||c.banco,data:series,borderColor:c.color||chartColors[i%chartColors.length],backgroundColor:(c.color||chartColors[i%chartColors.length])+'33',tension:.3,fill:false,spanGaps:true};
     });
     charts.saldos=new Chart(ctx1,{type:'line',data:{labels:allDates.map(d=>fmtDate(d)),datasets},options:chartBase});
@@ -1116,7 +1222,7 @@ function pintarAnilloCategorias(){
       totales[k]=(totales[k]||0)+e.monto;
     });
     colores=Object.keys(totales).map((_,i)=>chartColors[i%chartColors.length]);
-    if(titulo)titulo.innerHTML=`🍩 ${_anillo.categoria} <button class="btn btn-ghost btn-sm" onclick="volverAnillo()" style="margin-left:8px">← todas</button>`;
+    if(titulo)titulo.innerHTML=`🍩 ${esc(_anillo.categoria)} <button class="btn btn-ghost btn-sm" onclick="volverAnillo()" style="margin-left:8px">← todas</button>`;
   }else{
     delMes.forEach(e=>{totales[e.categoria]=(totales[e.categoria]||0)+e.monto});
     colores=Object.keys(totales).map(colorDeCategoria);
@@ -1160,7 +1266,7 @@ registerModule({
           const bols=ult&&ult.bolsillos?ult.bolsillos.filter(b=>b.m>0):[];
           return `<div class="card" style="border-left:4px solid ${c.color||'#00d4ff'};display:flex;flex-direction:column">
             <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
-              <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:1.05rem">${c.alias||c.banco}</div><div style="color:var(--muted);font-size:.78rem">${c.tipo}</div></div>
+              <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:1.05rem">${esc(c.alias||c.banco)}</div><div style="color:var(--muted);font-size:.78rem">${esc(c.tipo)}</div></div>
               <div style="display:flex;gap:6px"><button class="btn btn-icon btn-sm btn-ghost" onclick="formCuenta('${c.id}')" title="Editar">✎</button><button class="btn btn-icon btn-sm btn-ghost" onclick="delCuenta('${c.id}')" title="Eliminar">🗑</button></div>
             </div>
             <div style="font-size:1.7rem;font-weight:700;margin:14px 0 4px;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${ult?fmtCOP(p.proyectado):'<span style="color:var(--muted);font-size:1rem;font-weight:500">Sin registros</span>'}</div>
@@ -1173,7 +1279,7 @@ registerModule({
               ${p.totalOut?`<div><span class="k">${p.tOut.length} traslado(s) enviado(s)</span><span class="amount neg">−${fmtCOP(p.totalOut)}</span></div>`:''}
             </div>`:''}
             ${bols.length?`<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:10px 12px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px">
-              ${bols.map(b=>`<div style="display:flex;justify-content:space-between;font-size:.82rem;gap:8px"><span style="color:rgba(255,255,255,.7);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.n}</span><span class="amount" style="color:#fff">${fmtCOP(b.m)}</span></div>`).join('')}
+              ${bols.map(b=>`<div style="display:flex;justify-content:space-between;font-size:.82rem;gap:8px"><span style="color:rgba(255,255,255,.7);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.n)}</span><span class="amount" style="color:#fff">${fmtCOP(b.m)}</span></div>`).join('')}
             </div>`:''}
             <button class="btn btn-success btn-sm" style="width:100%;margin-top:auto" onclick="formSaldoFor('${c.id}')">＋ Actualizar saldo</button>
           </div>`;
@@ -1181,7 +1287,7 @@ registerModule({
       </div>
       <div class="card"><h3>📋 Historial de saldos · todas las versiones</h3>
         ${S.saldos.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Cuenta</th><th>Bolsillos</th><th style="text-align:right">Saldo</th><th></th></tr></thead><tbody>
-          ${S.saldos.map((s,i)=>({s,i})).sort((a,b)=>{const c=b.s.fecha.localeCompare(a.s.fecha);return c||(b.i-a.i)}).map(({s})=>{const c=S.cuentas.find(x=>x.id===s.cuentaId);const bols=s.bolsillos||[];return `<tr><td>${fmtDate(s.fecha)}</td><td><span class="dot" style="background:${c?.color||'#00d4ff'}"></span>${c?.alias||c?.banco||'—'}</td><td style="font-size:.8rem;color:var(--muted)">${bols.length?bols.filter(b=>b.m>0).map(b=>`${b.n}: ${fmtCOP(b.m)}`).join(' · '):(s.nota||'—')}</td><td style="text-align:right" class="amount">${fmtCOP(s.monto)}</td><td><button class="btn btn-icon btn-sm btn-ghost" onclick="delSaldo('${s.id}')" title="Eliminar versión">🗑</button></td></tr>`}).join('')}
+          ${S.saldos.map((s,i)=>({s,i})).sort((a,b)=>{const c=b.s.fecha.localeCompare(a.s.fecha);return c||(b.i-a.i)}).map(({s})=>{const c=S.cuentas.find(x=>x.id===s.cuentaId);const bols=s.bolsillos||[];return `<tr><td>${fmtDate(s.fecha)}</td><td><span class="dot" style="background:${c?.color||'#00d4ff'}"></span>${esc(c?.alias||c?.banco||'—')}</td><td style="font-size:.8rem;color:var(--muted)">${bols.length?bols.filter(b=>b.m>0).map(b=>`${esc(b.n)}: ${fmtCOP(b.m)}`).join(' · '):esc(s.nota||'—')}</td><td style="text-align:right" class="amount">${fmtCOP(s.monto)}</td><td><button class="btn btn-icon btn-sm btn-ghost" onclick="delSaldo('${s.id}')" title="Eliminar versión">🗑</button></td></tr>`}).join('')}
         </tbody></table></div>`:`<div class="empty"><div class="empty-icon">📋</div>Aún no has registrado saldos</div>`}
       </div>
       <div class="card" style="margin-top:18px"><h3>⇄ Traslados entre cuentas</h3>
@@ -1189,9 +1295,9 @@ registerModule({
         ${S.traslados.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Sale de</th><th>Entra a</th><th>Nota</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
           ${[...S.traslados].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(t=>`<tr>
             <td>${fmtDate(t.fecha)}</td>
-            <td>${nombreCuenta(t.origenId)||'<span style="color:var(--muted)">cuenta eliminada</span>'}</td>
-            <td>${nombreCuenta(t.destinoId)||'<span style="color:var(--muted)">cuenta eliminada</span>'}</td>
-            <td style="color:var(--muted);font-size:.85rem">${t.nota||'—'}</td>
+            <td>${esc(nombreCuenta(t.origenId))||'<span style="color:var(--muted)">cuenta eliminada</span>'}</td>
+            <td>${esc(nombreCuenta(t.destinoId))||'<span style="color:var(--muted)">cuenta eliminada</span>'}</td>
+            <td style="color:var(--muted);font-size:.85rem">${esc(t.nota||'—')}</td>
             <td style="text-align:right" class="amount">${fmtCOP(t.monto)}</td>
             <td><button class="btn btn-ghost btn-sm" onclick="formTraslado('${t.id}')">✎</button><button class="btn btn-ghost btn-sm" onclick="delTraslado('${t.id}')">🗑</button></td>
           </tr>`).join('')}
@@ -1205,8 +1311,8 @@ function formCuenta(id){
   const c=id?S.cuentas.find(x=>x.id===id):{banco:'',alias:'',tipo:'Ahorros',color:'#00d4ff'};
   openModal(`<h2>${id?'Editar':'Nueva'} cuenta</h2>
     <div class="form-grid" style="grid-template-columns:1fr;gap:12px">
-      <div class="field"><label>Banco / Entidad</label><input class="icone-input" id="f-banco" value="${c.banco||''}" placeholder="Bancolombia, Nequi, etc."></div>
-      <div class="field"><label>Alias (opcional)</label><input class="icone-input" id="f-alias" value="${c.alias||''}" placeholder="Cuenta principal"></div>
+      <div class="field"><label>Banco / Entidad</label><input class="icone-input" id="f-banco" value="${esc(c.banco)}" placeholder="Bancolombia, Nequi, etc."></div>
+      <div class="field"><label>Alias (opcional)</label><input class="icone-input" id="f-alias" value="${esc(c.alias)}" placeholder="Cuenta principal"></div>
       <div class="field"><label>Tipo</label><select class="icone-select" id="f-tipo">${['Ahorros','Corriente','Billetera digital','Tarjeta crédito','Efectivo','Inversión','Otro'].map(t=>`<option ${c.tipo===t?'selected':''}>${t}</option>`).join('')}</select></div>
       <div class="field"><label>Color</label><input type="color" id="f-color" value="${c.color||'#00d4ff'}" style="width:80px;height:40px;border:none;background:transparent;cursor:pointer"></div>
     </div>
@@ -1256,10 +1362,10 @@ function renderSaldoForm(cuentaId){
   const ult=getUltimoSaldo(cuentaId);
   // Bolsillos a editar: si hay último registro, copiar su lista; sino, un bolsillo "Principal" vacío
   const bolsillosTemplate=(ult&&ult.bolsillos&&ult.bolsillos.length)?ult.bolsillos.map(b=>({n:b.n,m:b.m})):[{n:"Principal",m:0}];
-  openModal(`<h2>Actualizar saldo · <span style="color:${c.color}">${c.alias||c.banco}</span></h2>
+  openModal(`<h2>Actualizar saldo · <span style="color:${esc(c.color)}">${esc(c.alias||c.banco)}</span></h2>
     ${ult?`<div style="background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.2);border-radius:12px;padding:10px 14px;margin-bottom:16px;font-size:.84rem"><span style="color:var(--muted)">Último corte:</span> <b>${fmtCOP(ult.monto)}</b> <span style="color:var(--muted)">· ${fmtDate(ult.fecha)}</span></div>`:''}
     <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">
-      <div class="field"><label>Cuenta</label><select class="icone-select" id="f-cuenta" onchange="renderSaldoForm(this.value)">${S.cuentas.map(x=>`<option value="${x.id}" ${x.id===cuentaId?'selected':''}>${x.alias||x.banco}</option>`).join('')}</select></div>
+      <div class="field"><label>Cuenta</label><select class="icone-select" id="f-cuenta" onchange="renderSaldoForm(this.value)">${S.cuentas.map(x=>`<option value="${x.id}" ${x.id===cuentaId?'selected':''}>${esc(x.alias||x.banco)}</option>`).join('')}</select></div>
       <div class="field"><label>Fecha del corte</label><input type="date" class="icone-input" id="f-fecha" value="${today()}"></div>
     </div>
 
@@ -1284,7 +1390,7 @@ function addBolsilloRow(nombre='',monto=''){
   const row=document.createElement('div');
   row.className='bolsillo-row';
   row.style.cssText='display:grid;grid-template-columns:1fr 130px 38px;gap:8px;align-items:center';
-  row.innerHTML=`<input class="icone-input" placeholder="Nombre del bolsillo" value="${nombre}" style="padding:11px 14px">
+  row.innerHTML=`<input class="icone-input" placeholder="Nombre del bolsillo" value="${esc(nombre)}" style="padding:11px 14px">
     <input type="number" step="any" class="icone-input bolsillo-monto" placeholder="0" value="${monto||''}" oninput="updateBolsilloTotal()" style="padding:11px 14px;text-align:right;font-variant-numeric:tabular-nums">
     <button class="btn btn-icon btn-sm btn-ghost" onclick="this.parentElement.remove();updateBolsilloTotal()" title="Eliminar">✕</button>`;
   wrap.appendChild(row);
@@ -1346,7 +1452,7 @@ function conciliar(prev,nuevo,cuenta){
   const gap=nuevo.monto-prev.proyectado;
   if(Math.abs(gap)<1000)return false;
   const falta=gap<0;
-  openModal(`<h2>${falta?'⚠️':'ℹ️'} Cuadre de ${cuenta.alias||cuenta.banco}</h2>
+  openModal(`<h2>${falta?'⚠️':'ℹ️'} Cuadre de ${esc(cuenta.alias||cuenta.banco)}</h2>
     <p style="color:var(--muted);font-size:.9rem;line-height:1.6;margin-bottom:14px">
       Comparé lo que registraste desde el corte del ${fmtDate(prev.fechaBase)} contra lo que acabas de leer en el banco.
     </p>
@@ -1383,7 +1489,7 @@ function delSaldo(id){if(!confirm('¿Eliminar este registro?'))return;S.saldos=S
 function formTraslado(id){
   if(S.cuentas.length<2)return toast('Necesitas al menos dos cuentas para hacer un traslado','error');
   const t=id?S.traslados.find(x=>x.id===id):{fecha:today(),monto:'',origenId:S.cuentas[0].id,destinoId:S.cuentas[1].id,nota:''};
-  const opts=sel=>S.cuentas.map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${c.alias||c.banco}</option>`).join('');
+  const opts=sel=>S.cuentas.map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${esc(c.alias||c.banco)}</option>`).join('');
   openModal(`<h2>${id?'Editar':'Nuevo'} traslado</h2>
     <p style="color:var(--muted);font-size:.86rem;line-height:1.6;margin-bottom:14px">Plata que mueves entre tus propias cuentas. No cuenta como ingreso ni como egreso: no cambia cuánto tienes, solo dónde lo tienes.</p>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
@@ -1392,7 +1498,7 @@ function formTraslado(id){
       <div class="field"><label>Fecha</label><input type="date" class="icone-input" id="t-fecha" value="${t.fecha}"></div>
       <div class="field"><label>Monto (COP)</label><input type="number" step="any" class="icone-input" id="t-monto" value="${t.monto}" placeholder="0" oninput="hintTraslado('${id||''}')"></div>
     </div>
-    <div class="field" style="margin-top:12px"><label>Nota</label><input class="icone-input" id="t-nota" value="${t.nota||''}" placeholder="Opcional"></div>
+    <div class="field" style="margin-top:12px"><label>Nota</label><input class="icone-input" id="t-nota" value="${esc(t.nota)}" placeholder="Opcional"></div>
     <div id="t-hint" class="cuenta-hint"></div>
     <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="saveTraslado('${id||''}')">Guardar</button></div>`);
   hintTraslado(id||'');
@@ -1409,7 +1515,7 @@ function hintTraslado(id){
   const guardado=idx>=0?S.traslados.splice(idx,1)[0]:null;
   const po=getSaldoProyectado(o).proyectado,pd=getSaldoProyectado(d).proyectado;
   if(guardado)S.traslados.splice(idx,0,guardado);
-  el.innerHTML=m?`Quedaría · ${nombreCuenta(o)} <b style="color:#fff">${fmtCOP(po-m)}</b> · ${nombreCuenta(d)} <b style="color:#fff">${fmtCOP(pd+m)}</b>`:'';
+  el.innerHTML=m?`Quedaría · ${esc(nombreCuenta(o))} <b style="color:#fff">${fmtCOP(po-m)}</b> · ${esc(nombreCuenta(d))} <b style="color:#fff">${fmtCOP(pd+m)}</b>`:'';
 }
 
 function saveTraslado(id){
@@ -1465,7 +1571,7 @@ function renderMovList(tipo){
     </div>
     <div class="card" style="margin-top:18px"><h3>📋 Movimientos</h3>
       ${arr.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Categoría</th><th>${tipo==='ing'?'Fuente':'Método'}</th><th>Nota</th><th>Recibos</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
-        ${[...arr].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${m.categoria}</span>${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${m.subcategoria}</div>`:''}</td><td>${tipo==='ing'?(m.fuente||'—'):(m.metodo||'—')}${m.cuentaId&&nombreCuenta(m.cuentaId)?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">🏦 ${nombreCuenta(m.cuentaId)}</div>`:''}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.nota||'—'}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')">🗑</button></td></tr>`).join('')}
+        ${[...arr].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${esc(m.categoria)}</span>${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${esc(m.subcategoria)}</div>`:''}</td><td>${esc(tipo==='ing'?(m.fuente||'—'):(m.metodo||'—'))}${m.cuentaId&&nombreCuenta(m.cuentaId)?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">🏦 ${esc(nombreCuenta(m.cuentaId))}</div>`:''}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.nota||'—')}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')">🗑</button></td></tr>`).join('')}
       </tbody></table></div>`:`<div class="empty"><div class="empty-icon">${tipo==='ing'?'💵':'💸'}</div>No hay ${tipo==='ing'?'ingresos':'egresos'} registrados</div>`}
     </div>
   `;
@@ -1534,7 +1640,7 @@ function campoCuenta(sel,tipo){
     <label>${tipo==='ing'?'¿A qué cuenta entró?':'¿De qué cuenta salió?'}</label>
     <select class="icone-select" id="f-cuenta-mov" onchange="hintCuenta(this.value)">
       <option value="">— Sin especificar —</option>
-      ${S.cuentas.map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${c.alias||c.banco}</option>`).join('')}
+      ${S.cuentas.map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${esc(c.alias||c.banco)}</option>`).join('')}
     </select>
     <div id="f-cuenta-hint" class="cuenta-hint"></div>
   </div>`;
@@ -1562,12 +1668,12 @@ function formMov(tipo,id){
     <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
       <div class="field"><label>Fecha</label><input type="date" class="icone-input" id="f-fecha" value="${m.fecha}"></div>
       <div class="field"><label>Monto (COP)</label><input type="number" step="any" class="icone-input" id="f-monto" value="${m.monto}" placeholder="0"></div>
-      <div class="field"><label>Categoría</label><select class="icone-select" id="f-cat" onchange="refrescarSubcat(document.querySelector('#modal-content .sub-wrap'),this.value)">${cats.map(c=>`<option ${m.categoria===c?'selected':''}>${c}</option>`).join('')}</select></div>
-      ${tipo==='ing'?`<div class="field"><label>Fuente</label><input class="icone-input" id="f-fuente" value="${m.fuente||''}" placeholder="Empresa, cliente..."></div>`:`<div class="field"><label>Método de pago</label><select class="icone-select" id="f-metodo">${S.metodos.map(x=>`<option ${m.metodo===x?'selected':''}>${x}</option>`).join('')}</select></div>`}
+      <div class="field"><label>Categoría</label><select class="icone-select" id="f-cat" onchange="refrescarSubcat(document.querySelector('#modal-content .sub-wrap'),this.value)">${cats.map(c=>`<option ${m.categoria===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
+      ${tipo==='ing'?`<div class="field"><label>Fuente</label><input class="icone-input" id="f-fuente" value="${esc(m.fuente)}" placeholder="Empresa, cliente..."></div>`:`<div class="field"><label>Método de pago</label><select class="icone-select" id="f-metodo">${S.metodos.map(x=>`<option ${m.metodo===x?'selected':''}>${esc(x)}</option>`).join('')}</select></div>`}
     </div>
     ${tipo==='eg'?`<div class="field" style="margin-top:12px"><label>Subcategoría</label>${campoSubcat(m.categoria,m.subcategoria,'100%')}</div>`:''}
     ${campoCuenta(m.cuentaId||'',tipo)}
-    <div class="field" style="margin-top:12px"><label>Nota</label><textarea class="icone-input" id="f-nota" rows="2" placeholder="Detalle...">${m.nota||''}</textarea></div>
+    <div class="field" style="margin-top:12px"><label>Nota</label><textarea class="icone-input" id="f-nota" rows="2" placeholder="Detalle...">${esc(m.nota)}</textarea></div>
     <div class="field" style="margin-top:14px">
       <label>Recibos / Comprobantes (fotos)</label>
       <label class="upload-zone" for="f-files"><div class="upload-icon">📸</div><div>Toca para subir fotos · puedes seleccionar varias</div><input type="file" id="f-files" accept="image/*" multiple onchange="onFilesPick(event)"></label>
@@ -1905,7 +2011,7 @@ async function onEscaneoPick(e){
   }catch(err){
     clearInterval(_cronoEsc);
     openModal(`<h2>⚠️ No se pudo leer</h2>
-      <p style="color:var(--red);margin:12px 0">${err.message}</p>
+      <p style="color:var(--red);margin:12px 0">${esc(err.message)}</p>
       <p style="color:var(--muted);font-size:.86rem">Puedes intentar con una foto más nítida, o registrar el gasto a mano.</p>
       <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button><button class="btn btn-primary" onclick="formEscaneo()">Reintentar</button></div>`);
   }
@@ -1919,12 +2025,12 @@ function renderRevisionEscaneo(){
 
   if(!items.length){
     return openModal(`<h2>🧾 Sin gastos detectados</h2>
-      <p style="color:var(--muted);margin:12px 0">${R.nota||'No se identificó ningún gasto en la imagen.'}</p>
+      <p style="color:var(--muted);margin:12px 0">${esc(R.nota||'No se identificó ningún gasto en la imagen.')}</p>
       <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button><button class="btn btn-primary" onclick="formEscaneo()">Probar otra imagen</button></div>`);
   }
 
   const E=R.establecimiento||{};
-  const opcionesCat=(sel)=>COICOP.map(c=>`<option ${sel===c.nombre?'selected':''}>${c.nombre}</option>`).join('');
+  const opcionesCat=(sel)=>COICOP.map(c=>`<option ${sel===c.nombre?'selected':''}>${esc(c.nombre)}</option>`).join('');
 
   const filas=items.map(it=>{
     const f=/^\d{4}-\d{2}-\d{2}$/.test(it.fecha)?it.fecha:fechaDoc;
@@ -1933,11 +2039,11 @@ function renderRevisionEscaneo(){
     const salida=it.sigue_prior===false;
     return `<tr${salida?' style="background:rgba(255,140,0,.07)"':''}>
       <td><input type="checkbox" class="esc-chk" checked onchange="recalcEscaneo()"></td>
-      <td><input class="icone-input esc-desc" value="${(it.descripcion||'').replace(/"/g,'&quot;')}" style="min-width:140px">
+      <td><input class="icone-input esc-desc" value="${esc(it.descripcion)}" style="min-width:140px">
           ${salida?'<div style="color:var(--orange);font-size:.72rem;margin-top:2px">↗ sacado del giro del negocio</div>':''}</td>
       <td><select class="icone-select esc-cat" onchange="refrescarSubcat(this.closest('tr').querySelector('.sub-wrap'),this.value);recalcEscaneo()">${opcionesCat(it.categoria)}</select></td>
       <td>${campoSubcat(it.categoria,it.subcategoria,'120px')}</td>
-      <td><select class="icone-select esc-met">${S.metodos.map(x=>`<option ${it.metodo===x?'selected':''}>${x}</option>`).join('')}</select></td>
+      <td><select class="icone-select esc-met">${S.metodos.map(x=>`<option ${it.metodo===x?'selected':''}>${esc(x)}</option>`).join('')}</select></td>
       <td><input type="date" class="icone-input esc-fecha" value="${f}"></td>
       <td><input type="number" step="any" class="icone-input esc-monto" value="${it.monto}" style="max-width:110px;text-align:right" oninput="recalcEscaneo()"></td>
     </tr>`;
@@ -1947,19 +2053,19 @@ function renderRevisionEscaneo(){
     <div style="display:flex;gap:14px;align-items:flex-start;margin:12px 0 14px">
       <img src="${imagen.dataUrl}" style="width:110px;border-radius:12px;border:1px solid var(--card-border);cursor:zoom-in" onclick="openImg(_escaneo.imagen.dataUrl)">
       <div style="flex:1;display:flex;flex-direction:column;gap:8px">
-        <div class="field"><label>Comercio</label><input class="icone-input" id="esc-comercio" value="${(E.nombre||'').replace(/"/g,'&quot;')}" placeholder="Nombre del comercio"></div>
+        <div class="field"><label>Comercio</label><input class="icone-input" id="esc-comercio" value="${esc(E.nombre)}" placeholder="Nombre del comercio"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:.82rem">
-          <span class="badge purple">${R.tipo_documento||'documento'}</span>
-          <span class="badge ${colorConf}">confianza ${R.confianza||'—'}</span>
+          <span class="badge purple">${esc(R.tipo_documento||'documento')}</span>
+          <span class="badge ${colorConf}">confianza ${esc(R.confianza||'—')}</span>
           ${_escaneo.segundos?`<span class="badge">⚡ ${_escaneo.segundos.toFixed(1)} s · ${_escaneo.esfuerzo}</span>`:''}
           ${R.total_documento?`<span style="color:var(--muted)">total impreso: ${fmtCOP(R.total_documento)}</span>`:''}
         </div>
-        ${R.nota?`<div style="color:var(--yellow);font-size:.82rem">⚠️ ${R.nota}</div>`:''}
+        ${R.nota?`<div style="color:var(--yellow);font-size:.82rem">⚠️ ${esc(R.nota)}</div>`:''}
       </div>
     </div>
     ${E.giro?`<div class="card" style="padding:10px 14px;margin-bottom:12px;font-size:.84rem">
-      <b style="color:var(--cyan)">Lo leí como ${E.giro}</b> → arranca en <b>${E.categoria_probable||'—'}</b>
-      ${E.razon?`<div style="color:var(--muted);margin-top:3px">${E.razon}</div>`:''}
+      <b style="color:var(--cyan)">Lo leí como ${esc(E.giro)}</b> → arranca en <b>${esc(E.categoria_probable||'—')}</b>
+      ${E.razon?`<div style="color:var(--muted);margin-top:3px">${esc(E.razon)}</div>`:''}
       <div style="color:var(--muted);margin-top:3px">Luego revisó cada línea por separado; las resaltadas se salieron de esa división.</div>
     </div>`:''}
     <div class="table-wrap" id="esc-tabla" style="max-height:34vh;overflow:auto">
@@ -2256,7 +2362,7 @@ async function vozInterpretar(){
   if(!texto)return;
   vozDetener();
   openModal(`<h2>🎤 Interpretando...</h2>
-    <p style="color:var(--muted);margin:12px 0">"${texto.slice(0,180)}${texto.length>180?'…':''}"</p>
+    <p style="color:var(--muted);margin:12px 0">"${esc(texto.slice(0,180))}${texto.length>180?'…':''}"</p>
     <div style="font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums" id="esc-crono">0.0 s</div>`);
   const t0=arrancarCrono();
   try{
@@ -2270,7 +2376,7 @@ async function vozInterpretar(){
     renderRevisionVoz(res,texto,(performance.now()-t0)/1000);
   }catch(err){
     clearInterval(_cronoEsc);
-    openModal(`<h2>⚠️ No se pudo interpretar</h2><p style="color:var(--red);margin:12px 0">${err.message}</p>
+    openModal(`<h2>⚠️ No se pudo interpretar</h2><p style="color:var(--red);margin:12px 0">${esc(err.message)}</p>
       <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button><button class="btn btn-primary" onclick="formVoz()">Reintentar</button></div>`);
   }
 }
@@ -2282,7 +2388,7 @@ function renderRevisionVoz(R,texto,segs){
   ];
   if(!filas.length){
     return openModal(`<h2>🎤 No entendí ningún movimiento</h2>
-      <p style="color:var(--muted);margin:12px 0">${R.nota||'No se identificó ningún ingreso ni egreso.'}</p>
+      <p style="color:var(--muted);margin:12px 0">${esc(R.nota||'No se identificó ningún ingreso ni egreso.')}</p>
       <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button><button class="btn btn-primary" onclick="formVoz()">Intentar de nuevo</button></div>`);
   }
   const colorConf={alta:'green',media:'orange',baja:'red'}[R.confianza]||'orange';
@@ -2293,7 +2399,7 @@ function renderRevisionVoz(R,texto,segs){
       <td><select class="icone-select vz-tipo" onchange="vozCambiarTipo(this)">
             <option value="eg" ${x.tipo==='eg'?'selected':''}>Egreso</option>
             <option value="ing" ${x.tipo==='ing'?'selected':''}>Ingreso</option></select></td>
-      <td><input class="icone-input vz-desc" value="${(x.descripcion||'').replace(/"/g,'&quot;')}" style="min-width:150px"></td>
+      <td><input class="icone-input vz-desc" value="${esc(x.descripcion)}" style="min-width:150px"></td>
       <td class="vz-cat-td">${vozSelectCat(x.tipo,x.categoria)}</td>
       <td class="vz-sub-td">${x.tipo==='eg'?campoSubcat(x.categoria,x.subcategoria,'120px'):'<span style="color:var(--muted)">—</span>'}</td>
       <td><input type="date" class="icone-input vz-fecha" value="${f}"></td>
@@ -2303,13 +2409,13 @@ function renderRevisionVoz(R,texto,segs){
 
   openModal(`<h2>🎤 Revisa lo que entendí</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:.82rem;margin:10px 0">
-      <span class="badge ${colorConf}">confianza ${R.confianza||'—'}</span>
+      <span class="badge ${colorConf}">confianza ${esc(R.confianza||'—')}</span>
       <span class="badge">⚡ ${segs.toFixed(1)} s</span>
     </div>
     <div class="card" style="padding:10px 14px;margin-bottom:12px;font-size:.84rem">
-      <div style="color:var(--muted);font-style:italic">"${texto.slice(0,220)}${texto.length>220?'…':''}"</div>
-      ${R.entendido?`<div style="margin-top:6px"><b style="color:var(--cyan)">Entendí:</b> ${R.entendido}</div>`:''}
-      ${R.nota?`<div style="color:var(--yellow);margin-top:4px">⚠️ ${R.nota}</div>`:''}
+      <div style="color:var(--muted);font-style:italic">"${esc(texto.slice(0,220))}${texto.length>220?'…':''}"</div>
+      ${R.entendido?`<div style="margin-top:6px"><b style="color:var(--cyan)">Entendí:</b> ${esc(R.entendido)}</div>`:''}
+      ${R.nota?`<div style="color:var(--yellow);margin-top:4px">⚠️ ${esc(R.nota)}</div>`:''}
     </div>
     <div class="table-wrap" id="vz-tabla" style="max-height:40vh;overflow:auto">
       <table><thead><tr><th></th><th>Tipo</th><th>Descripción</th><th>Categoría</th><th>Subcategoría</th><th>Fecha</th><th style="text-align:right">Monto</th></tr></thead>
@@ -2326,7 +2432,7 @@ function renderRevisionVoz(R,texto,segs){
 
 function vozSelectCat(tipo,sel){
   const lista=tipo==='ing'?S.catIngreso:COICOP.map(c=>c.nombre);
-  return `<select class="icone-select vz-cat" onchange="vozCatCambio(this)">${lista.map(c=>`<option ${sel===c?'selected':''}>${c}</option>`).join('')}</select>`;
+  return `<select class="icone-select vz-cat" onchange="vozCatCambio(this)">${lista.map(c=>`<option ${sel===c?'selected':''}>${esc(c)}</option>`).join('')}</select>`;
 }
 /* Cambiar ingreso↔egreso rehace las categorías y la subcategoría de esa fila.
    Recordamos la categoría de cada tipo, para que si te arrepientes y vuelves
@@ -2455,11 +2561,11 @@ Devuelve SOLO los gastos cuya categoría debe cambiar. Si la actual ya es correc
         <table><thead><tr><th></th><th>Gasto</th><th>De</th><th>A</th><th>Subcategoría</th></tr></thead><tbody>
         ${validos.map(c=>{const e=eg.find(x=>x.id===c.id);return `<tr data-id="${c.id}">
           <td><input type="checkbox" class="rec-chk" checked></td>
-          <td style="max-width:190px"><div>${(e.nota||'—').slice(0,60)}</div><div style="color:var(--muted);font-size:.74rem">${fmtDate(e.fecha)} · ${fmtCOP(e.monto)}</div>
-              <div style="color:var(--muted);font-size:.72rem;font-style:italic">${c.razon||''}</div></td>
-          <td style="color:var(--muted);font-size:.8rem">${e.categoria}</td>
-          <td><span class="badge orange">${c.categoria}</span></td>
-          <td style="font-size:.8rem;color:var(--muted)">${c.subcategoria||'—'}</td>
+          <td style="max-width:190px"><div>${esc((e.nota||'—').slice(0,60))}</div><div style="color:var(--muted);font-size:.74rem">${fmtDate(e.fecha)} · ${fmtCOP(e.monto)}</div>
+              <div style="color:var(--muted);font-size:.72rem;font-style:italic">${esc(c.razon)}</div></td>
+          <td style="color:var(--muted);font-size:.8rem">${esc(e.categoria)}</td>
+          <td><span class="badge orange">${esc(c.categoria)}</span></td>
+          <td style="font-size:.8rem;color:var(--muted)">${esc(c.subcategoria||'—')}</td>
         </tr>`}).join('')}
         </tbody></table>
       </div>
@@ -2469,7 +2575,7 @@ Devuelve SOLO los gastos cuya categoría debe cambiar. Si la actual ya es correc
       </div>`);
   }catch(err){
     clearInterval(_cronoEsc);
-    openModal(`<h2>⚠️ No se pudo revisar</h2><p style="color:var(--red);margin:12px 0">${err.message}</p>
+    openModal(`<h2>⚠️ No se pudo revisar</h2><p style="color:var(--red);margin:12px 0">${esc(err.message)}</p>
       <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>`);
   }
 }
@@ -2513,7 +2619,7 @@ registerModule({
       return `<div class="thumb" onclick="openImg('${r.data}')">
         <img src="${r.data}" loading="lazy">
         <div class="thumb-info">
-          ${link?`<div class="a">${link.tipo==='ing'?'+':'-'}${fmtCOP(link.mov.monto)}</div><div>${link.mov.categoria} · ${fmtDate(link.mov.fecha)}</div>`:`<div class="a" style="color:var(--muted)">Sin vincular</div>`}
+          ${link?`<div class="a">${link.tipo==='ing'?'+':'-'}${fmtCOP(link.mov.monto)}</div><div>${esc(link.mov.categoria)} · ${fmtDate(link.mov.fecha)}</div>`:`<div class="a" style="color:var(--muted)">Sin vincular</div>`}
         </div>
       </div>`;
     }).join('')+'</div>';
@@ -2531,7 +2637,7 @@ function renderConfig(){
     <div class="card" style="margin-bottom:18px;border:2px solid ${currentUser?'rgba(0,212,138,.5)':'rgba(0,212,255,.4)'};background:linear-gradient(135deg,${currentUser?'rgba(0,212,138,.08)':'rgba(0,212,255,.08)'},rgba(123,47,255,.06))">
       <h3>☁️ Sincronización en la nube</h3>
       ${currentUser?`
-        <p style="color:var(--muted);font-size:.9rem;margin-bottom:12px">Conectado como <b style="color:var(--green)">${currentUser.email}</b></p>
+        <p style="color:var(--muted);font-size:.9rem;margin-bottom:12px">Conectado como <b style="color:var(--green)">${esc(currentUser.email)}</b></p>
         <p style="font-size:.85rem;color:var(--muted);margin-bottom:14px">✓ Tus cambios se sincronizan automáticamente entre todos tus dispositivos. Abre la app en otro celular o PC con este mismo email y verás los mismos datos.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="pullFromCloud()">⬇️ Bajar de la nube</button>
@@ -2579,9 +2685,9 @@ function renderConfig(){
         </div>
       </div>
       <div class="card"><h3>🏷️ Categorías</h3>
-        <div class="field" style="margin-bottom:10px"><label>Categorías de ingreso</label><textarea class="icone-input" id="cat-ing" rows="3">${S.catIngreso.join(', ')}</textarea></div>
-        <div class="field" style="margin-bottom:10px"><label>Categorías de egreso</label><textarea class="icone-input" id="cat-eg" rows="4">${S.catEgreso.join(', ')}</textarea></div>
-        <div class="field" style="margin-bottom:10px"><label>Métodos de pago</label><textarea class="icone-input" id="cat-met" rows="2">${S.metodos.join(', ')}</textarea></div>
+        <div class="field" style="margin-bottom:10px"><label>Categorías de ingreso</label><textarea class="icone-input" id="cat-ing" rows="3">${esc(S.catIngreso.join(', '))}</textarea></div>
+        <div class="field" style="margin-bottom:10px"><label>Categorías de egreso</label><textarea class="icone-input" id="cat-eg" rows="4">${esc(S.catEgreso.join(', '))}</textarea></div>
+        <div class="field" style="margin-bottom:10px"><label>Métodos de pago</label><textarea class="icone-input" id="cat-met" rows="2">${esc(S.metodos.join(', '))}</textarea></div>
         <button class="btn btn-primary" onclick="saveCats()">Guardar categorías</button>
         <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--card-border)">
           <div style="font-size:.84rem;color:var(--muted);margin-bottom:8px">Las categorías siguen <b>COICOP 2018</b>, la clasificación de consumo de los hogares de Naciones Unidas y base del IPC del DANE. Las subcategorías las va aprendiendo la app de tus propios recibos.</div>
@@ -2598,7 +2704,7 @@ function renderConfig(){
     </div>
     <div class="card" style="margin-top:18px"><h3>🧩 Módulos personalizados</h3>
       <p style="color:var(--muted);font-size:.88rem;margin-bottom:14px">Crea módulos adicionales para presupuestos, metas de ahorro, inversiones, deudas, etc.</p>
-      ${modulesCustom.length?`<div class="table-wrap"><table><thead><tr><th>Icono</th><th>Nombre</th><th>Tipo</th><th></th></tr></thead><tbody>${modulesCustom.map(m=>`<tr><td style="font-size:1.3rem">${m.icon}</td><td>${m.label}</td><td><span class="badge">${m.type}</span></td><td><button class="btn btn-ghost btn-sm" onclick="delCustomModule('${m.id}')">🗑</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Sin módulos personalizados</div>'}
+      ${modulesCustom.length?`<div class="table-wrap"><table><thead><tr><th>Icono</th><th>Nombre</th><th>Tipo</th><th></th></tr></thead><tbody>${modulesCustom.map(m=>`<tr><td style="font-size:1.3rem">${esc(m.icon)}</td><td>${esc(m.label)}</td><td><span class="badge">${esc(m.type)}</span></td><td><button class="btn btn-ghost btn-sm" onclick="delCustomModule('${m.id}')">🗑</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Sin módulos personalizados</div>'}
       <button class="btn btn-outline" style="margin-top:12px" onclick="openAddModule()">+ Crear módulo</button>
     </div>
   `;
@@ -2694,7 +2800,7 @@ function renderCustomModule(mod){
   }else{
     html=`<div class="kpi-grid"><div class="kpi"><div class="kpi-label">Total</div><div class="kpi-value">${fmtCOP(total)}</div><div class="kpi-meta">${items.length} items</div></div></div>`;
   }
-  html+=`<div class="card"><h3>${mod.icon} Items</h3>${items.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Nota</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>${[...items].sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(it=>`<tr><td>${fmtDate(it.fecha)}</td><td>${it.concepto||'—'}</td><td style="color:var(--muted);font-size:.85rem">${it.nota||'—'}</td><td style="text-align:right" class="amount">${fmtCOP(it.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="delCustomItem('${mod.id}','${it.id}')">🗑</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><div class="empty-icon">'+mod.icon+'</div>Sin items aún</div>'}</div>`;
+  html+=`<div class="card"><h3>${esc(mod.icon)} Items</h3>${items.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Nota</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>${[...items].sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(it=>`<tr><td>${fmtDate(it.fecha)}</td><td>${esc(it.concepto||'—')}</td><td style="color:var(--muted);font-size:.85rem">${esc(it.nota||'—')}</td><td style="text-align:right" class="amount">${fmtCOP(it.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="delCustomItem('${mod.id}','${it.id}')">🗑</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><div class="empty-icon">'+esc(mod.icon)+'</div>Sin items aún</div>'}</div>`;
   document.getElementById('view-container').innerHTML=html;
 }
 function formCustomItem(modId){
@@ -2727,8 +2833,8 @@ let currentView='dashboard';
 
 function renderNav(){
   const nav=document.getElementById('nav-list');
-  nav.innerHTML=modules.map(m=>`<div class="nav-item ${m.id===currentView?'active':''}" data-go="${m.id}"><span class="nav-icon">${m.icon}</span><span>${m.label}</span></div>`).join('')+
-    modulesCustom.map(m=>`<div class="nav-item ${m.id===currentView?'active':''}" data-go="${m.id}"><span class="nav-icon">${m.icon}</span><span>${m.label}</span></div>`).join('');
+  nav.innerHTML=modules.map(m=>`<div class="nav-item ${m.id===currentView?'active':''}" data-go="${m.id}"><span class="nav-icon">${esc(m.icon)}</span><span>${esc(m.label)}</span></div>`).join('')+
+    modulesCustom.map(m=>`<div class="nav-item ${m.id===currentView?'active':''}" data-go="${m.id}"><span class="nav-icon">${esc(m.icon)}</span><span>${esc(m.label)}</span></div>`).join('');
   document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>go(el.dataset.go));
 }
 
