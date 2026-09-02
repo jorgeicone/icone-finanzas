@@ -33,6 +33,10 @@
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
+/* Foco visible. Antes no había ninguno: con el teclado no se veía dónde
+   estabas parado, y buena parte de la app ni siquiera se alcanzaba. */
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:6px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 body{background:var(--navy);color:var(--white);font-family:'SF Pro Display','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;overflow-x:hidden;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-0.01em}
 button,input,select,textarea{font-family:inherit;letter-spacing:inherit}
 body::before{content:"";position:fixed;inset:0;background:radial-gradient(ellipse at top left,rgba(123,47,255,.15),transparent 50%),radial-gradient(ellipse at bottom right,rgba(0,212,255,.12),transparent 50%);pointer-events:none;z-index:0}
@@ -64,7 +68,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .brand-name{font-weight:800;font-size:1.05rem;line-height:1.1}
 .brand-name small{display:block;font-size:.65rem;color:var(--muted);font-weight:500;letter-spacing:1px;text-transform:uppercase;margin-top:2px}
 .nav-section{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;padding:14px 12px 6px}
-.nav-item{display:flex;align-items:center;gap:14px;padding:12px 14px;border-radius:12px;cursor:pointer;color:rgba(255,255,255,.72);transition:background .18s,color .18s,transform .15s;font-size:.93rem;font-weight:500;margin-bottom:3px;border:1px solid transparent;letter-spacing:-.01em;-webkit-tap-highlight-color:transparent}
+.nav-item{display:flex;align-items:center;gap:14px;width:100%;text-align:left;font-family:inherit;background:transparent;padding:12px 14px;border-radius:12px;cursor:pointer;color:rgba(255,255,255,.72);transition:background .18s,color .18s,transform .15s;font-size:.93rem;font-weight:500;margin-bottom:3px;border:1px solid transparent;letter-spacing:-.01em;-webkit-tap-highlight-color:transparent}
 .nav-item:hover{background:rgba(255,255,255,.06);color:#fff}
 .nav-item:active{transform:scale(.98)}
 .nav-item.active{background:linear-gradient(135deg,rgba(0,212,255,.18),rgba(123,47,255,.12));color:#fff;border-color:rgba(0,212,255,.25);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 4px 14px -6px rgba(0,212,255,.3)}
@@ -260,29 +264,29 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
 
 <div class="app">
   <!-- SIDEBAR -->
-  <aside class="sidebar" id="sidebar">
+  <aside class="sidebar" id="sidebar" aria-label="Menú principal">
     <div class="brand">
       <img class="brand-logo" src="img/icono.svg" alt="ICONE Finanzas" width="44" height="44">
       <div class="brand-name">ICONE Finanzas<small>ialabs</small></div>
     </div>
 
-    <div class="nav-section">Principal</div>
-    <div id="nav-list"></div>
+    <div class="nav-section" id="nav-titulo-principal">Principal</div>
+    <nav id="nav-list" aria-labelledby="nav-titulo-principal"></nav>
 
     <div class="nav-section">Datos</div>
-    <div class="nav-item" data-go="config"><span class="nav-icon">⚙️</span><span>Configuración</span></div>
-    <div class="nav-item add-module" onclick="openAddModule()"><span>＋ Agregar módulo</span></div>
+    <button type="button" class="nav-item" data-go="config"><span class="nav-icon" aria-hidden="true">⚙️</span><span>Configuración</span></button>
+    <button type="button" class="nav-item add-module" onclick="openAddModule()">＋ Agregar módulo</button>
 
-    <div id="sync-indicator" onclick="go('config')" style="margin-top:16px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);cursor:pointer;display:flex;align-items:center;gap:10px;font-size:.82rem;transition:.2s">
+    <button type="button" id="sync-indicator" onclick="go('config')" aria-label="Estado de sincronización. Abre Configuración." style="margin-top:16px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);cursor:pointer;display:flex;align-items:center;gap:10px;font-size:.82rem;transition:.2s">
       <span id="sync-dot" style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.3)"></span>
       <div style="flex:1;min-width:0">
         <div id="sync-label" style="font-weight:600">Modo local</div>
         <div id="sync-sub" style="font-size:.7rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Sin sincronizar</div>
       </div>
-    </div>
+    </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.28</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.29</b></div>
       <div style="margin-top:2px">Build 2026-09-02</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -292,7 +296,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
   <main class="main">
     <div class="topbar">
       <div>
-        <button class="menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <button type="button" class="menu-btn" onclick="alternarMenu(this)" aria-expanded="false" aria-controls="sidebar" aria-label="Abrir el menú">☰</button>
         <h1 class="page-title"><span class="gradient" id="page-title">Dashboard</span></h1>
         <div class="page-sub" id="page-sub">Resumen financiero consolidado</div>
       </div>
@@ -305,16 +309,16 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
 
 <!-- Modal genérico -->
 <div class="modal-bg" id="modal-bg" onclick="if(event.target.id==='modal-bg')closeModal()">
-  <div class="modal" id="modal-content"></div>
+  <div class="modal" id="modal-content" role="dialog" aria-modal="true" aria-labelledby="modal-titulo" tabindex="-1"></div>
 </div>
 
 <!-- Modal imagen -->
 <div class="modal-bg" id="img-modal" onclick="document.getElementById('img-modal').classList.remove('active')">
-  <img id="img-modal-src" class="modal-img" alt="Recibo">
+  <img id="img-modal-src" class="modal-img" alt="Recibo ampliado">
 </div>
 
 <!-- Toast -->
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 /* ============================================================
@@ -772,13 +776,37 @@ async function loginWithPassword(){
   toast('✓ Bienvenido');
 }
 
-async function setPassword(){
-  const newPass=prompt('Crea una contraseña (mínimo 6 caracteres) para poder entrar desde la app instalada sin magic link:');
-  if(!newPass)return;
-  if(newPass.length<6)return toast('Mínimo 6 caracteres','error');
-  const {error}=await sb.auth.updateUser({password:newPass});
-  if(error)return toast('Error: '+error.message,'error');
-  toast('✓ Contraseña creada. Ahora puedes entrar con email + contraseña');
+/* La contraseña se pedía con prompt(), que se ve en texto plano, no deja
+   confirmarla y en varios navegadores ni siquiera aparece. Ahora es un
+   formulario con campos de tipo password y confirmación. */
+function setPassword(){
+  openModal(`<h2>🔑 Crear contraseña</h2>
+    <p style="color:var(--muted);font-size:.88rem;margin-bottom:14px">
+      Sirve para entrar desde la app instalada en el celular sin tener que abrir el correo cada vez.
+    </p>
+    <div class="field" style="margin-bottom:10px"><label for="pw-1">Contraseña nueva</label>
+      <input class="icone-input" id="pw-1" type="password" autocomplete="new-password" minlength="6" placeholder="Mínimo 6 caracteres"></div>
+    <div class="field" style="margin-bottom:6px"><label for="pw-2">Repítela</label>
+      <input class="icone-input" id="pw-2" type="password" autocomplete="new-password"
+        onkeydown="if(event.key==='Enter')guardarPassword()"></div>
+    <div id="pw-error" style="color:var(--red);font-size:.84rem;min-height:1.2em"></div>
+    <div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarPassword()">Guardar contraseña</button>
+    </div>`);
+}
+
+async function guardarPassword(){
+  const a=document.getElementById('pw-1').value;
+  const b=document.getElementById('pw-2').value;
+  const err=document.getElementById('pw-error');
+  if(a.length<6){err.textContent='La contraseña necesita al menos 6 caracteres.';return}
+  if(a!==b){err.textContent='Las dos contraseñas no coinciden.';return}
+  err.textContent='';
+  const {error}=await sb.auth.updateUser({password:a});
+  if(error){err.textContent=error.message;return}
+  closeModal();
+  toast('✓ Contraseña creada. Ya puedes entrar con email y contraseña');
 }
 
 async function logoutSupabase(){
@@ -816,6 +844,96 @@ function dbGet(id){return new Promise((res,rej)=>{const tx=DB.transaction('recib
 function dbAll(){return new Promise((res,rej)=>{const tx=DB.transaction('recibos','readonly');const r=tx.objectStore('recibos').getAll();r.onsuccess=()=>res(r.result);r.onerror=rej})}
 function dbDel(id){return new Promise((res,rej)=>{const tx=DB.transaction('recibos','readwrite');tx.objectStore('recibos').delete(id);tx.oncomplete=()=>res();tx.onerror=rej})}
 
+/* ═══════════════════════════════════════════════════════════
+   RECIBOS EN LA NUBE
+
+   Las fotos vivían solo en el IndexedDB del navegador. Eso significaba dos
+   cosas malas: en otro dispositivo el gasto mostraba «📎 1» y la foto no
+   existía en ninguna parte, y Safari en iOS borra el IndexedDB de los sitios
+   que no estén instalados a los 7 días sin visitarlos. Son el soporte de
+   gasto: tienen que estar en el servidor.
+
+   El IndexedDB se queda como caché local —abre al instante y funciona sin
+   señal— pero la copia buena vive en el bucket privado `recibos`, en
+   <user_id>/<id>.jpg, con políticas que comparan esa carpeta con auth.uid().
+   ═══════════════════════════════════════════════════════════ */
+const BUCKET_RECIBOS='recibos';
+const rutaRecibo=id=>`${currentUser.id}/${id}.jpg`;
+
+function dataUrlABlob(dataUrl){
+  const [cab,b64]=dataUrl.split(',');
+  const tipo=(cab.match(/data:([^;]+)/)||[,'image/jpeg'])[1];
+  const bin=atob(b64),buf=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)buf[i]=bin.charCodeAt(i);
+  return new Blob([buf],{type:tipo});
+}
+function blobADataUrl(blob){
+  return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=rej;fr.readAsDataURL(blob)});
+}
+
+async function subirRecibo(rec){
+  if(!sb||!currentUser||!rec||!rec.data)return false;
+  try{
+    const {error}=await sb.storage.from(BUCKET_RECIBOS)
+      .upload(rutaRecibo(rec.id),dataUrlABlob(rec.data),{contentType:'image/jpeg',upsert:true});
+    if(error)throw error;
+    rec.nube=true;await dbPut(rec);
+    return true;
+  }catch(e){console.error('Recibo no subido:',e.message);return false}
+}
+
+async function bajarRecibo(id){
+  if(!sb||!currentUser)return null;
+  try{
+    const {data,error}=await sb.storage.from(BUCKET_RECIBOS).download(rutaRecibo(id));
+    if(error||!data)return null;
+    const rec={id,data:await blobADataUrl(data),name:'recibo-'+id+'.jpg',
+      size:data.size,createdAt:new Date().toISOString(),nube:true};
+    await dbPut(rec);   // se cachea para no volver a bajarla
+    return rec;
+  }catch(e){return null}
+}
+
+/* Busca el recibo donde esté: primero en este dispositivo; si no está
+   —porque lo subiste desde otro celular, o porque el navegador lo purgó—
+   lo trae de la nube y lo deja cacheado. */
+async function obtenerRecibo(id){
+  const local=await dbGet(id);
+  if(local&&local.data)return local;
+  return bajarRecibo(id);
+}
+
+async function borrarReciboEnNube(id){
+  if(!sb||!currentUser)return;
+  try{await sb.storage.from(BUCKET_RECIBOS).remove([rutaRecibo(id)])}catch(e){}
+}
+
+/* Borra en los dos sitios. Antes solo borraba el local, así que la copia
+   del servidor quedaba huérfana para siempre. */
+async function borrarRecibo(id){
+  await dbDel(id);
+  await borrarReciboEnNube(id);
+}
+
+/* Sube de una las fotos que todavía no tienen copia en el servidor: las de
+   antes de esta versión, y las que fallaron por estar sin señal. */
+async function sincronizarRecibos(silencioso){
+  if(!currentUser)return silencioso?null:toast('Inicia sesión primero en Configuración','error');
+  const todos=await dbAll();
+  const faltan=todos.filter(r=>!r.nube&&r.data);
+  if(!faltan.length)return silencioso?null:toast('Todos los recibos ya están respaldados');
+  let n=0;
+  for(const r of faltan){
+    if(await subirRecibo(r))n++;
+    const el=document.getElementById('rec-sync-estado');
+    if(el)el.textContent=`Subiendo… ${n} de ${faltan.length}`;
+  }
+  const el=document.getElementById('rec-sync-estado');
+  if(el)el.textContent=n===faltan.length?`✓ ${n} recibo(s) respaldado(s)`:`${n} de ${faltan.length} subidos · reintenta con mejor señal`;
+  if(!silencioso)toast(`☁️ ${n} de ${faltan.length} recibo(s) respaldado(s)`);
+  return n;
+}
+
 /* ---------- TOAST ---------- */
 function toast(msg,type='success'){
   const t=document.getElementById('toast');
@@ -824,14 +942,38 @@ function toast(msg,type='success'){
 }
 
 /* ---------- MODAL ---------- */
-function openModal(html){document.getElementById('modal-content').innerHTML=html+'<button class="modal-close" onclick="closeModal()">✕</button>';document.getElementById('modal-bg').classList.add('active')}
+/* Al abrir un modal se recuerda quién tenía el foco, se marca su título
+   para que el lector de pantalla lo anuncie, y el foco entra al diálogo.
+   Al cerrarlo, el foco vuelve de donde salió. */
+let _focoPrevio=null;
+function openModal(html){
+  const abierto=document.getElementById('modal-bg').classList.contains('active');
+  if(!abierto)_focoPrevio=document.activeElement;
+  const cont=document.getElementById('modal-content');
+  cont.innerHTML=html+'<button type="button" class="modal-close" onclick="closeModal()" aria-label="Cerrar">✕</button>';
+  const h2=cont.querySelector('h2');
+  if(h2)h2.id='modal-titulo';
+  document.getElementById('modal-bg').classList.add('active');
+  (cont.querySelector('input:not([type=hidden]),select,textarea,button')||cont).focus();
+}
 function closeModal(){
   // Si el micrófono quedó abierto, cerrarlo pase lo que pase: si no, sigue
   // reanudándose en segundo plano con el modal ya cerrado.
   if(typeof _voz!=='undefined'&&_voz&&_voz.escuchando){try{vozDetener()}catch(_){}}
   document.getElementById('modal-bg').classList.remove('active');
+  if(_focoPrevio&&document.contains(_focoPrevio)){try{_focoPrevio.focus()}catch(_){}}
+  _focoPrevio=null;
 }
 function openImg(src){document.getElementById('img-modal-src').src=src;document.getElementById('img-modal').classList.add('active')}
+
+/* Escape cierra lo que esté abierto. Sin esto, con teclado no había forma
+   de salir de un modal. */
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  const img=document.getElementById('img-modal');
+  if(img.classList.contains('active'))return img.classList.remove('active');
+  if(document.getElementById('modal-bg').classList.contains('active'))closeModal();
+});
 
 /* ---------- REGISTRO DE MÓDULOS ---------- */
 const modules=[];
@@ -1267,7 +1409,7 @@ registerModule({
           return `<div class="card" style="border-left:4px solid ${c.color||'#00d4ff'};display:flex;flex-direction:column">
             <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
               <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:1.05rem">${esc(c.alias||c.banco)}</div><div style="color:var(--muted);font-size:.78rem">${esc(c.tipo)}</div></div>
-              <div style="display:flex;gap:6px"><button class="btn btn-icon btn-sm btn-ghost" onclick="formCuenta('${c.id}')" title="Editar">✎</button><button class="btn btn-icon btn-sm btn-ghost" onclick="delCuenta('${c.id}')" title="Eliminar">🗑</button></div>
+              <div style="display:flex;gap:6px"><button class="btn btn-icon btn-sm btn-ghost" onclick="formCuenta('${c.id}')" title="Editar" aria-label="Editar la cuenta ${esc(c.alias||c.banco)}">✎</button><button class="btn btn-icon btn-sm btn-ghost" onclick="delCuenta('${c.id}')" title="Eliminar" aria-label="Eliminar la cuenta ${esc(c.alias||c.banco)}">🗑</button></div>
             </div>
             <div style="font-size:1.7rem;font-weight:700;margin:14px 0 4px;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${ult?fmtCOP(p.proyectado):'<span style="color:var(--muted);font-size:1rem;font-weight:500">Sin registros</span>'}</div>
             <div style="color:var(--muted);font-size:.75rem;margin-bottom:12px">${ult?(p.n?`Proyectado · ${nregs} corte(s)`:`${fmtDate(ult.fecha)} · ${nregs} corte(s)`):'—'}</div>
@@ -1287,7 +1429,7 @@ registerModule({
       </div>
       <div class="card"><h3>📋 Historial de saldos · todas las versiones</h3>
         ${S.saldos.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Cuenta</th><th>Bolsillos</th><th style="text-align:right">Saldo</th><th></th></tr></thead><tbody>
-          ${S.saldos.map((s,i)=>({s,i})).sort((a,b)=>{const c=b.s.fecha.localeCompare(a.s.fecha);return c||(b.i-a.i)}).map(({s})=>{const c=S.cuentas.find(x=>x.id===s.cuentaId);const bols=s.bolsillos||[];return `<tr><td>${fmtDate(s.fecha)}</td><td><span class="dot" style="background:${c?.color||'#00d4ff'}"></span>${esc(c?.alias||c?.banco||'—')}</td><td style="font-size:.8rem;color:var(--muted)">${bols.length?bols.filter(b=>b.m>0).map(b=>`${esc(b.n)}: ${fmtCOP(b.m)}`).join(' · '):esc(s.nota||'—')}</td><td style="text-align:right" class="amount">${fmtCOP(s.monto)}</td><td><button class="btn btn-icon btn-sm btn-ghost" onclick="delSaldo('${s.id}')" title="Eliminar versión">🗑</button></td></tr>`}).join('')}
+          ${S.saldos.map((s,i)=>({s,i})).sort((a,b)=>{const c=b.s.fecha.localeCompare(a.s.fecha);return c||(b.i-a.i)}).map(({s})=>{const c=S.cuentas.find(x=>x.id===s.cuentaId);const bols=s.bolsillos||[];return `<tr><td>${fmtDate(s.fecha)}</td><td><span class="dot" style="background:${c?.color||'#00d4ff'}"></span>${esc(c?.alias||c?.banco||'—')}</td><td style="font-size:.8rem;color:var(--muted)">${bols.length?bols.filter(b=>b.m>0).map(b=>`${esc(b.n)}: ${fmtCOP(b.m)}`).join(' · '):esc(s.nota||'—')}</td><td style="text-align:right" class="amount">${fmtCOP(s.monto)}</td><td><button class="btn btn-icon btn-sm btn-ghost" onclick="delSaldo('${s.id}')" title="Eliminar versión" aria-label="Eliminar el corte del ${fmtDate(s.fecha)}">🗑</button></td></tr>`}).join('')}
         </tbody></table></div>`:`<div class="empty"><div class="empty-icon">📋</div>Aún no has registrado saldos</div>`}
       </div>
       <div class="card" style="margin-top:18px"><h3>⇄ Traslados entre cuentas</h3>
@@ -1299,7 +1441,7 @@ registerModule({
             <td>${esc(nombreCuenta(t.destinoId))||'<span style="color:var(--muted)">cuenta eliminada</span>'}</td>
             <td style="color:var(--muted);font-size:.85rem">${esc(t.nota||'—')}</td>
             <td style="text-align:right" class="amount">${fmtCOP(t.monto)}</td>
-            <td><button class="btn btn-ghost btn-sm" onclick="formTraslado('${t.id}')">✎</button><button class="btn btn-ghost btn-sm" onclick="delTraslado('${t.id}')">🗑</button></td>
+            <td><button class="btn btn-ghost btn-sm" onclick="formTraslado('${t.id}')" aria-label="Editar el traslado del ${fmtDate(t.fecha)}">✎</button><button class="btn btn-ghost btn-sm" onclick="delTraslado('${t.id}')" aria-label="Eliminar el traslado del ${fmtDate(t.fecha)}">🗑</button></td>
           </tr>`).join('')}
         </tbody></table></div>`:`<div class="empty"><div class="empty-icon">⇄</div>Aún no has registrado traslados</div>`}
       </div>
@@ -1392,7 +1534,7 @@ function addBolsilloRow(nombre='',monto=''){
   row.style.cssText='display:grid;grid-template-columns:1fr 130px 38px;gap:8px;align-items:center';
   row.innerHTML=`<input class="icone-input" placeholder="Nombre del bolsillo" value="${esc(nombre)}" style="padding:11px 14px">
     <input type="number" step="any" class="icone-input bolsillo-monto" placeholder="0" value="${monto||''}" oninput="updateBolsilloTotal()" style="padding:11px 14px;text-align:right;font-variant-numeric:tabular-nums">
-    <button class="btn btn-icon btn-sm btn-ghost" onclick="this.parentElement.remove();updateBolsilloTotal()" title="Eliminar">✕</button>`;
+    <button type="button" class="btn btn-icon btn-sm btn-ghost" onclick="this.parentElement.remove();updateBolsilloTotal()" title="Eliminar" aria-label="Quitar este bolsillo">✕</button>`;
   wrap.appendChild(row);
   // focus al nuevo si está vacío
   if(!nombre)row.querySelector('input').focus();
@@ -1571,7 +1713,7 @@ function renderMovList(tipo){
     </div>
     <div class="card" style="margin-top:18px"><h3>📋 Movimientos</h3>
       ${arr.length?`<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Categoría</th><th>${tipo==='ing'?'Fuente':'Método'}</th><th>Nota</th><th>Recibos</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
-        ${[...arr].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${esc(m.categoria)}</span>${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${esc(m.subcategoria)}</div>`:''}</td><td>${esc(tipo==='ing'?(m.fuente||'—'):(m.metodo||'—'))}${m.cuentaId&&nombreCuenta(m.cuentaId)?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">🏦 ${esc(nombreCuenta(m.cuentaId))}</div>`:''}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.nota||'—')}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')">🗑</button></td></tr>`).join('')}
+        ${[...arr].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td>${fmtDate(m.fecha)}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${esc(m.categoria)}</span>${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${esc(m.subcategoria)}</div>`:''}</td><td>${esc(tipo==='ing'?(m.fuente||'—'):(m.metodo||'—'))}${m.cuentaId&&nombreCuenta(m.cuentaId)?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">🏦 ${esc(nombreCuenta(m.cuentaId))}</div>`:''}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.nota||'—')}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')" aria-label="Editar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')" aria-label="Eliminar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">🗑</button></td></tr>`).join('')}
       </tbody></table></div>`:`<div class="empty"><div class="empty-icon">${tipo==='ing'?'💵':'💸'}</div>No hay ${tipo==='ing'?'ingresos':'egresos'} registrados</div>`}
     </div>
   `;
@@ -1688,7 +1830,9 @@ function formMov(tipo,id){
 async function renderExistingRecibosInForm(ids){
   const wrap=document.getElementById('f-preview');
   for(const rid of ids){
-    const r=await dbGet(rid);if(!r)continue;
+    /* obtenerRecibo, no dbGet: si la foto se subió desde otro dispositivo
+       no está en este IndexedDB y hay que traerla del servidor. */
+    const r=await obtenerRecibo(rid);if(!r||!wrap)continue;
     const div=document.createElement('div');div.className='p';
     div.innerHTML=`<img src="${r.data}"><button class="x" onclick="this.parentElement.remove();_removedExisting=_removedExisting||[];_removedExisting.push('${rid}')">✕</button>`;
     div.dataset.existing=rid;
@@ -1746,10 +1890,10 @@ async function saveMov(tipo,id){
     else S.config.ultimaCuentaEg=data.cuentaId;
   }
 
-  // recibos: guardar nuevos en DB
-  for(const r of _pendingRecibos){await dbPut(r)}
-  // recibos eliminados al editar
-  for(const rid of (_removedExisting||[])){await dbDel(rid)}
+  /* Cada foto se guarda local Y se sube. Si no hay sesión o no hay señal,
+     queda marcada como pendiente y sube después desde Configuración. */
+  for(const r of _pendingRecibos){await dbPut(r);await subirRecibo(r)}
+  for(const rid of (_removedExisting||[])){await borrarRecibo(rid)}
 
   const arr=tipo==='ing'?S.ingresos:S.egresos;
   if(id){
@@ -1768,7 +1912,7 @@ function delMov(tipo,id){
   if(!confirm('¿Eliminar este movimiento? Los recibos asociados también se eliminarán.'))return;
   const arr=tipo==='ing'?S.ingresos:S.egresos;
   const m=arr.find(x=>x.id===id);
-  if(m&&m.recibos)m.recibos.forEach(r=>dbDel(r));
+  if(m&&m.recibos)m.recibos.forEach(r=>borrarRecibo(r));
   if(tipo==='ing')S.ingresos=S.ingresos.filter(x=>x.id!==id);
   else S.egresos=S.egresos.filter(x=>x.id!==id);
   saveState();rerender();toast('Eliminado');
@@ -2151,7 +2295,7 @@ async function guardarEscaneo(){
 
   // La foto queda como recibo, ligada a cada gasto que salió de ella.
   const rec={id:uid(),data:_escaneo.imagen.dataUrl,name:'escaneo-'+today()+'.jpg',size:_escaneo.imagen.dataUrl.length,createdAt:new Date().toISOString()};
-  await dbPut(rec);
+  await dbPut(rec);await subirRecibo(rec);
 
   const comercio=(document.getElementById('esc-comercio').value||'').trim();
   const pre=comercio?comercio+' · ':'';
@@ -2515,13 +2659,48 @@ async function reclasificarHistorico(){
   const eg=(S.egresos||[]).filter(e=>e.monto>0);
   if(!eg.length)return toast('No hay egresos para revisar','error');
 
-  openModal(`<h2>🔄 Revisando tus gastos anteriores</h2>
-    <p style="color:var(--muted);margin:12px 0">Releyendo ${eg.length} egreso(s) con el criterio COICOP.</p>
+  /* Por lotes, no todo de una. Mandar los 285 egresos en un solo prompt con
+     max_tokens 8000 tenía dos finales malos: la respuesta se truncaba y
+     JSON.parse reventaba, o la petición pasaba de los ~150 s que aguanta el
+     Edge Function y devolvía 503. Con lotes de 50, cada llamada es corta y
+     lo que ya se revisó no se pierde si una falla. */
+  const LOTE=50;
+  const lotes=[];
+  for(let i=0;i<eg.length;i+=LOTE)lotes.push(eg.slice(i,i+LOTE));
+
+  const pintarProgreso=(n)=>openModal(`<h2>🔄 Revisando tus gastos anteriores</h2>
+    <p style="color:var(--muted);margin:12px 0">Releyendo ${eg.length} egreso(s) con el criterio COICOP,
+      en ${lotes.length} tanda(s) de ${LOTE}.</p>
+    <div style="background:rgba(255,255,255,.08);border-radius:50px;height:8px;overflow:hidden;margin-bottom:10px">
+      <div style="width:${Math.round(n/lotes.length*100)}%;height:100%;background:linear-gradient(90deg,var(--cyan),var(--purple))"></div></div>
+    <div style="color:var(--muted);font-size:.86rem">Tanda ${Math.min(n+1,lotes.length)} de ${lotes.length}</div>
     <div style="font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums" id="esc-crono">0.0 s</div>`);
+
+  pintarProgreso(0);
   arrancarCrono();
 
-  const lista=eg.map(e=>`${e.id} | ${e.fecha} | ${fmtCOP(e.monto)} | ${(e.nota||'(sin nota)').slice(0,90)} | actual: ${e.categoria}`).join('\n');
+  let cambios=[],fallaron=0;
   try{
+    for(let i=0;i<lotes.length;i++){
+      if(i){pintarProgreso(i);arrancarCrono()}
+      const lista=lotes[i].map(e=>`${e.id} | ${e.fecha} | ${fmtCOP(e.monto)} | ${(e.nota||'(sin nota)').slice(0,90)} | actual: ${e.categoria}`).join('\n');
+      try{
+        cambios=cambios.concat(await reclasificarLote(lista));
+      }catch(err){
+        // Una tanda caída no bota las demás: se cuenta y se sigue.
+        console.error('Tanda',i+1,'falló:',err.message);fallaron++;
+      }
+    }
+    clearInterval(_cronoEsc);
+    mostrarCambiosReclas(cambios,eg,fallaron);
+  }catch(err){
+    clearInterval(_cronoEsc);
+    openModal(`<h2>⚠️ No se pudo revisar</h2><p style="color:var(--red);margin:12px 0">${esc(err.message)}</p>
+      <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>`);
+  }
+}
+
+async function reclasificarLote(lista){
     const r=await llamarClaude({
       model:MODELO_VISION,max_tokens:8000,
       system:`Reclasificas gastos ya registrados de una persona en Colombia según COICOP 2018.
@@ -2546,16 +2725,21 @@ Devuelve SOLO los gastos cuya categoría debe cambiar. Si la actual ya es correc
           }}}}}}},
       messages:[{role:'user',content:`Gastos a revisar:\n${lista}\n\nSubcategorías que ya usa:\n${vocabularioSubcategorias()}`}]
     });
-    clearInterval(_cronoEsc);
-    const {cambios}=JSON.parse(r.text);
+    return JSON.parse(r.text).cambios||[];
+}
+
+function mostrarCambiosReclas(cambios,eg,fallaron){
     const validos=(cambios||[]).filter(c=>eg.some(e=>e.id===c.id&&e.categoria!==c.categoria));
     _reclas=validos;
+    const aviso=fallaron?`<div style="color:var(--yellow);font-size:.84rem;margin-bottom:10px">⚠️ ${fallaron} tanda(s) no se pudieron leer. Puedes volver a correrlo para revisar esos gastos.</div>`:'';
     if(!validos.length){
       return openModal(`<h2>✓ Todo está bien clasificado</h2>
+        ${aviso}
         <p style="color:var(--muted);margin:12px 0">Revisé ${eg.length} egreso(s) y ninguno necesita cambiar de categoría.</p>
         <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-primary" onclick="closeModal()">Listo</button></div>`);
     }
     openModal(`<h2>🔄 ${validos.length} cambio(s) propuesto(s)</h2>
+      ${aviso}
       <p style="color:var(--muted);font-size:.86rem;margin:8px 0 12px">De ${eg.length} egresos revisados. Desmarca los que no quieras aplicar.</p>
       <div class="table-wrap" id="rec-tabla" style="max-height:46vh;overflow:auto">
         <table><thead><tr><th></th><th>Gasto</th><th>De</th><th>A</th><th>Subcategoría</th></tr></thead><tbody>
@@ -2573,11 +2757,6 @@ Devuelve SOLO los gastos cuya categoría debe cambiar. Si la actual ya es correc
         <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
         <button class="btn btn-primary" onclick="aplicarReclasificacion()">Aplicar seleccionados</button>
       </div>`);
-  }catch(err){
-    clearInterval(_cronoEsc);
-    openModal(`<h2>⚠️ No se pudo revisar</h2><p style="color:var(--red);margin:12px 0">${esc(err.message)}</p>
-      <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>`);
-  }
 }
 
 function aplicarReclasificacion(){
@@ -2604,25 +2783,53 @@ registerModule({
   id:'recibos',label:'Recibos',icon:'🧾',sub:'Galería de comprobantes y fotos de recibos',
   render(){return `<div class="card"><h3>📸 Galería de recibos</h3><div id="gallery-host"><div class="empty">Cargando...</div></div></div>`;},
   async afterRender(){
-    const all=await dbAll();
     const host=document.getElementById('gallery-host');
     // Leer de IndexedDB toma su tiempo. Si cambiaste de sección mientras
     // tanto, este contenedor ya no existe: salir en vez de reventar.
     if(!host)return;
-    if(!all.length){host.innerHTML='<div class="empty"><div class="empty-icon">🧾</div>Aún no hay recibos. Súbelos al registrar ingresos o egresos.</div>';return}
+
     // mapear recibo → movimiento
     const idx={};
     S.ingresos.forEach(m=>(m.recibos||[]).forEach(r=>idx[r]={tipo:'ing',mov:m}));
     S.egresos.forEach(m=>(m.recibos||[]).forEach(r=>idx[r]={tipo:'eg',mov:m}));
-    host.innerHTML='<div class="gallery">'+all.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(r=>{
-      const link=idx[r.id];
-      return `<div class="thumb" onclick="openImg('${r.data}')">
-        <img src="${r.data}" loading="lazy">
+
+    /* La lista ya no sale solo del IndexedDB: se arma con los recibos que
+       los movimientos dicen tener —así aparecen los subidos desde otro
+       dispositivo— más los sueltos que haya en este. */
+    const locales=await dbAll();
+    const enLocal=new Map(locales.map(r=>[r.id,r]));
+    const ids=[...new Set([...Object.keys(idx),...locales.map(r=>r.id)])];
+    if(!ids.length){host.innerHTML='<div class="empty"><div class="empty-icon">🧾</div>Aún no hay recibos. Súbelos al registrar ingresos o egresos.</div>';return}
+
+    const orden=(a,b)=>{
+      const fa=idx[a]?idx[a].mov.fecha:(enLocal.get(a)?.createdAt||'');
+      const fb=idx[b]?idx[b].mov.fecha:(enLocal.get(b)?.createdAt||'');
+      return fb.localeCompare(fa);
+    };
+    host.innerHTML='<div class="gallery" id="gallery-grid"></div>';
+    const grid=document.getElementById('gallery-grid');
+
+    let faltantes=0;
+    for(const id of ids.sort(orden)){
+      const r=enLocal.get(id)||await obtenerRecibo(id);
+      if(!document.getElementById('gallery-grid'))return;  // cambiaste de sección
+      if(!r||!r.data){faltantes++;continue}
+      const link=idx[id];
+      const div=document.createElement('div');
+      div.className='thumb';
+      div.onclick=()=>openImg(r.data);
+      div.innerHTML=`<img src="${r.data}" loading="lazy" alt="Recibo">
         <div class="thumb-info">
           ${link?`<div class="a">${link.tipo==='ing'?'+':'-'}${fmtCOP(link.mov.monto)}</div><div>${esc(link.mov.categoria)} · ${fmtDate(link.mov.fecha)}</div>`:`<div class="a" style="color:var(--muted)">Sin vincular</div>`}
-        </div>
-      </div>`;
-    }).join('')+'</div>';
+        </div>`;
+      grid.appendChild(div);
+    }
+    if(faltantes){
+      const aviso=document.createElement('div');
+      aviso.style.cssText='margin-top:14px;font-size:.84rem;color:var(--yellow)';
+      aviso.textContent=`⚠️ ${faltantes} recibo(s) no se encontraron ni aquí ni en la nube. Se registraron antes de que las fotos se respaldaran en el servidor.`;
+      host.appendChild(aviso);
+    }
   }
 });
 
@@ -2667,6 +2874,21 @@ function renderConfig(){
       `}
     </div>
 
+    <div class="card" style="margin-bottom:18px">
+      <h3>🧾 Respaldo de los recibos</h3>
+      <p style="color:var(--muted);font-size:.9rem;margin-bottom:12px">
+        Hasta la v0.28 las fotos vivían solo en este dispositivo: no viajaban a tus otros
+        aparatos y el navegador podía borrarlas. Ahora cada foto nueva se sube sola al
+        servidor. Las de antes hay que subirlas una vez, desde cada dispositivo donde
+        tengas recibos guardados.
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-primary" onclick="sincronizarRecibos()">☁️ Subir recibos pendientes</button>
+        <span id="rec-sync-estado" style="font-size:.86rem;color:var(--muted)"></span>
+      </div>
+      <div id="rec-sync-conteo" style="margin-top:10px;font-size:.82rem;color:var(--muted)"></div>
+    </div>
+
     <div class="card" style="margin-bottom:18px;border:1px solid rgba(255,140,0,.3)">
       <h3>🔄 ¿Algo no se guarda o se ve raro?</h3>
       <p style="color:var(--muted);font-size:.9rem;margin-bottom:14px">Borra la copia guardada en este dispositivo y la vuelve a bajar de la nube. Úsalo solo si algo se ve desactualizado y refrescar no lo arregla. <b>Si no has iniciado sesión, la app queda vacía.</b></p>
@@ -2708,7 +2930,21 @@ function renderConfig(){
       <button class="btn btn-outline" style="margin-top:12px" onclick="openAddModule()">+ Crear módulo</button>
     </div>
   `;
+  contarRecibosPendientes();
 }
+/* Cuántas fotos hay en este dispositivo y cuántas ya tienen copia en el
+   servidor. Se pinta después del render porque leer IndexedDB es asíncrono. */
+async function contarRecibosPendientes(){
+  const el=document.getElementById('rec-sync-conteo');
+  if(!el)return;
+  const todos=await dbAll();
+  if(!document.getElementById('rec-sync-conteo'))return;
+  const faltan=todos.filter(r=>!r.nube).length;
+  el.textContent=todos.length
+    ? `${todos.length} foto(s) en este dispositivo · ${faltan?faltan+' sin respaldar':'todas respaldadas ✓'}`
+    : 'No hay fotos guardadas en este dispositivo.';
+}
+
 function saveCats(){
   S.catIngreso=document.getElementById('cat-ing').value.split(',').map(s=>s.trim()).filter(Boolean);
   S.catEgreso=document.getElementById('cat-eg').value.split(',').map(s=>s.trim()).filter(Boolean);
@@ -2742,7 +2978,7 @@ async function wipeAll(){
   if(!confirm('⚠️ Esto borrará TODOS tus datos y recibos. ¿Continuar?'))return;
   if(!confirm('Esta acción NO se puede deshacer. ¿Seguro?'))return;
   localStorage.removeItem(STORE_KEY);localStorage.removeItem(STORE_KEY+'_modules');
-  const all=await dbAll();for(const r of all)await dbDel(r.id);
+  const all=await dbAll();for(const r of all)await borrarRecibo(r.id);
   location.reload();
 }
 async function forceReset(){
@@ -2833,12 +3069,29 @@ let currentView='dashboard';
 
 function renderNav(){
   const nav=document.getElementById('nav-list');
-  nav.innerHTML=modules.map(m=>`<div class="nav-item ${m.id===currentView?'active':''}" data-go="${m.id}"><span class="nav-icon">${esc(m.icon)}</span><span>${esc(m.label)}</span></div>`).join('')+
-    modulesCustom.map(m=>`<div class="nav-item ${m.id===currentView?'active':''}" data-go="${m.id}"><span class="nav-icon">${esc(m.icon)}</span><span>${esc(m.label)}</span></div>`).join('');
+  /* Botones de verdad, no divs con onclick: así entran en el orden de
+     tabulación, responden a Enter y Espacio solos, y el lector de pantalla
+     los anuncia como lo que son. El emoji va aria-hidden porque el nombre
+     del módulo ya dice todo. */
+  const boton=m=>`<button type="button" class="nav-item ${m.id===currentView?'active':''}" data-go="${m.id}"${m.id===currentView?' aria-current="page"':''}><span class="nav-icon" aria-hidden="true">${esc(m.icon)}</span><span>${esc(m.label)}</span></button>`;
+  nav.innerHTML=modules.map(boton).join('')+modulesCustom.map(boton).join('');
   document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>go(el.dataset.go));
 }
 
-function go(id){currentView=id;rerender();if(window.innerWidth<=900)document.getElementById('sidebar').classList.remove('open')}
+function go(id){
+  currentView=id;rerender();
+  if(window.innerWidth<=900){
+    document.getElementById('sidebar').classList.remove('open');
+    const b=document.querySelector('.menu-btn');
+    if(b)b.setAttribute('aria-expanded','false');
+  }
+}
+
+function alternarMenu(btn){
+  const abierto=document.getElementById('sidebar').classList.toggle('open');
+  btn.setAttribute('aria-expanded',abierto?'true':'false');
+  btn.setAttribute('aria-label',abierto?'Cerrar el menú':'Abrir el menú');
+}
 
 /* Fondo fotográfico por sección. Las imágenes son WebP de ~40 KB y viven
    en /img; el oscurecimiento va en el mismo degradado para que el texto
@@ -2917,6 +3170,14 @@ document.addEventListener('mousemove',e=>{
   btn.style.setProperty('--my',(e.clientY-r.top)+'px');
 });
 
+/* El service worker es lo que hace que la app instalada abra sin señal.
+   Va después del primer render a propósito: registrarlo no debe retrasar
+   lo que ves. Si el navegador no lo soporta, la app funciona igual. */
+function registrarSW(){
+  if(!('serviceWorker' in navigator))return;
+  navigator.serviceWorker.register('sw.js').catch(e=>console.warn('SW no registrado:',e.message));
+}
+
 (async function init(){
   loadState();
   await openDB();
@@ -2924,6 +3185,7 @@ document.addEventListener('mousemove',e=>{
   rerender();
   // Inicializar sincronización (no bloquea el render)
   initSupabase();
+  registrarSW();
 })();
 </script>
 </body>
