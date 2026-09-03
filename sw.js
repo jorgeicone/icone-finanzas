@@ -21,7 +21,7 @@
                  guardarlas sería servir saldos viejos, o los de otra sesión.
    ============================================================ */
 
-const VERSION = 'v0.32';
+const VERSION = 'v0.33';
 const CACHE = 'icone-finanzas-' + VERSION;
 
 const ESENCIALES = [
@@ -37,6 +37,7 @@ const ESENCIALES = [
   './img/fondo-saldos.webp',
   './img/fondo-ingresos.webp',
   './img/fondo-egresos.webp',
+  './img/fondo-fijos.webp',
   './img/fondo-recibos.webp',
   './img/fondo-config.webp',
   'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js',

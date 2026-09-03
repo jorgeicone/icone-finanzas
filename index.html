@@ -302,7 +302,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.32</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.33</b></div>
       <div style="margin-top:2px">Build 2026-09-02</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -3534,7 +3534,7 @@ function renderConfig(){
             <input type="checkbox" id="cfg-fondos" ${S.config?.fondos!==false?'checked':''} onchange="alternarFondos(this.checked)">
             Mostrar fotografía de fondo en cada sección
           </label>
-          <div style="font-size:.8rem;color:var(--muted);margin-top:6px">Pesan 289 KB en total y se guardan en caché la primera vez. Si prefieres el fondo liso, apágalo aquí.</div>
+          <div style="font-size:.8rem;color:var(--muted);margin-top:6px">Pesan unos 350 KB en total y se guardan en caché la primera vez. Si prefieres el fondo liso, apágalo aquí.</div>
         </div>
       </div>
     </div>
@@ -3791,7 +3791,7 @@ function alternarMenu(btn){
 /* Fondo fotográfico por sección. Las imágenes son WebP de ~40 KB y viven
    en /img; el oscurecimiento va en el mismo degradado para que el texto
    nunca pierda contraste. Se puede apagar desde Configuración. */
-const FONDOS=['dashboard','saldos','ingresos','egresos','recibos','config'];
+const FONDOS=['dashboard','saldos','ingresos','egresos','fijos','recibos','config'];
 function alternarFondos(v){
   S.config=S.config||{};S.config.fondos=v;
   saveState();pintarFondoSeccion();
