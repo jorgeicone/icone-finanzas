@@ -302,7 +302,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.31</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.32</b></div>
       <div style="margin-top:2px">Build 2026-09-02</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -422,6 +422,9 @@ let S={
      quedan fuera de todas las gráficas de gasto sin tener que filtrarlos en
      cada una. */
   traslados:[],
+  /* Plantillas de gasto que se repiten. No crean movimientos solas: generan
+     un ESPERADO que luego se concilia contra lo que de verdad ocurrio. */
+  recurrentes:[],
   catIngreso:['Salario','Freelance','Inversiones','Ventas','Reembolso','Otros'],
   catEgreso:[...COICOP.map(c=>c.nombre)],
   subcatEgreso:{},   // { "Categoría": ["subcategoría aprendida", ...] }
@@ -491,7 +494,7 @@ function recordarAmbito(tipo,v){
    pase, y cubre de una vez los tres sitios que sobreescriben el estado:
    carga local, sincronización con la nube y restauración de respaldo. */
 function normalizeState(){
-  ['cuentas','saldos','ingresos','egresos','traslados','catIngreso','catEgreso','metodos'].forEach(k=>{
+  ['cuentas','saldos','ingresos','egresos','traslados','recurrentes','catIngreso','catEgreso','metodos'].forEach(k=>{
     if(!Array.isArray(S[k]))S[k]=[];
   });
   if(!S.subcatEgreso||typeof S.subcatEgreso!=='object')S.subcatEgreso={};
@@ -1079,6 +1082,7 @@ registerModule({
         <div class="kpi red"><div class="kpi-label">Egresos del mes</div><div class="kpi-value">${fmtCOP(egMes)}</div><div class="kpi-meta">${pctDelta(egMes,egPrev,true)}</div></div>
         <div class="kpi orange"><div class="kpi-label">Flujo neto</div><div class="kpi-value" style="color:${flujo>=0?'var(--green)':'var(--red)'}">${fmtCOP(flujo)}</div><div class="kpi-meta">${flujo>=0?'Superávit':'Déficit'} del mes</div></div>
       </div>
+      ${avisoFijosPendientes(mk)}
       ${repartoAmbito(mk)}
 
       <div class="grid-2">
@@ -1108,6 +1112,31 @@ registerModule({
   },
   afterRender(){renderDashboardCharts()}
 });
+
+/* Fijos que todavía no aparecen registrados este mes. Es el aviso que
+   habría evitado que faltaran cinco arriendos: no cuenta lo que gastaste,
+   cuenta lo que declaraste que iba a pasar y todavía no ha pasado. */
+function avisoFijosPendientes(mk){
+  const pend=pendientesDelMes(mk);
+  if(!pend.length)return '';
+  const total=pend.reduce((a,e)=>a+e.esperado,0);
+  const hoy=+today().slice(8,10);
+  const vencidos=pend.filter(e=>(e.r.diaDelMes||1)<hoy);
+  return `<div class="card" style="margin-bottom:18px;border:1px solid rgba(255,140,0,.35);background:rgba(255,140,0,.06)">
+    <div style="display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:center">
+      <div style="min-width:220px;flex:1">
+        <div style="font-weight:700;font-size:1.02rem">🔁 ${pend.length} gasto(s) fijo(s) sin registrar este mes</div>
+        <div style="color:var(--muted);font-size:.86rem;margin-top:4px">
+          Suman ${fmtCOP(total)}${vencidos.length?` · <b style="color:var(--orange)">${vencidos.length} ya pasaron su día habitual</b>`:''}
+        </div>
+        <div style="color:var(--muted);font-size:.8rem;margin-top:6px">
+          ${pend.slice(0,4).map(e=>esc(e.r.concepto)).join(' · ')}${pend.length>4?` y ${pend.length-4} más`:''}
+        </div>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="go('fijos')">Ver los fijos</button>
+    </div>
+  </div>`;
+}
 
 /* Reparto personal / negocio del mes. Solo aparece cuando de verdad hay
    algo marcado como negocio: si toda tu plata es personal, una tarjeta que
@@ -1962,7 +1991,7 @@ function formMov(tipo,id){
      _removedExisting solo se limpiaba al final de saveMov, así que si
      quitabas un recibo y cancelabas, el id quedaba en la lista y el
      siguiente movimiento que guardaras ejecutaba ese borrado. */
-  _pendingRecibos=[];_removedExisting=[];
+  _pendingRecibos=[];_removedExisting=[];_desdeFijo=null;
   openModal(`<h2>${id?'Editar':'Nuevo'} ${tipo==='ing'?'ingreso':'egreso'}</h2>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
       <div class="field"><label>Fecha</label><input type="date" class="icone-input" id="f-fecha" value="${m.fecha}"></div>
@@ -2032,6 +2061,9 @@ async function saveMov(tipo,id){
     ambito:valorAmbito()
   };
   recordarAmbito(tipo,data.ambito);
+  /* Si el gasto nace de una plantilla de fijo, queda vinculado a ella. Asi
+     la conciliacion es exacta y no depende de emparejar por texto. */
+  if(_desdeFijo&&tipo==='eg')data.recurrenteId=_desdeFijo;
   if(tipo==='ing')data.fuente=document.getElementById('f-fuente').value.trim();
   else{
     data.metodo=document.getElementById('f-metodo').value;
@@ -2067,7 +2099,7 @@ async function saveMov(tipo,id){
        anotado el 2 de septiembre» y no quede duda de dónde cayó. */
     arr.push({id:uid(),...data,recibos:_pendingRecibos.map(r=>r.id),createdAt:new Date().toISOString()});
   }
-  _pendingRecibos=[];_removedExisting=[];
+  _pendingRecibos=[];_removedExisting=[];_desdeFijo=null;
   saveState();closeModal();rerender();toast('Movimiento guardado');
 }
 
@@ -2079,6 +2111,362 @@ function delMov(tipo,id){
   if(tipo==='ing')S.ingresos=S.ingresos.filter(x=>x.id!==id);
   else S.egresos=S.egresos.filter(x=>x.id!==id);
   saveState();rerender();toast('Eliminado');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   GASTOS FIJOS RECURRENTES
+
+   El problema que resuelve: hasta ahora cada gasto era un evento suelto y
+   no había forma de decir «esto se repite todos los meses». Por eso podían
+   faltar cinco arriendos sin que nada lo notara.
+
+   La pieza clave es la distinción entre ESPERADO y REAL. Un recurrente no
+   crea movimientos por su cuenta —inventar gastos que quizá no ocurrieron
+   sería peor que no tenerlos— sino que declara lo que debería pasar este
+   mes. La app compara eso contra lo que registraste y te muestra la
+   diferencia: qué falta por pagar, y qué llegó por un monto distinto.
+
+   Esa misma maquinaria de esperado contra real es la que después necesita
+   el presupuesto, así que se construye una vez y sirve dos veces.
+   ═══════════════════════════════════════════════════════════ */
+const PERIODOS=[
+  {id:'mensual',   etiqueta:'Cada mes',        meses:1},
+  {id:'bimestral', etiqueta:'Cada 2 meses',    meses:2},
+  {id:'trimestral',etiqueta:'Cada 3 meses',    meses:3},
+  {id:'semestral', etiqueta:'Cada 6 meses',    meses:6},
+  {id:'anual',     etiqueta:'Una vez al año',  meses:12}
+];
+const mesesDelPeriodo=p=>(PERIODOS.find(x=>x.id===p)||PERIODOS[0]).meses;
+const etiquetaPeriodo=p=>(PERIODOS.find(x=>x.id===p)||PERIODOS[0]).etiqueta;
+
+/* Distancia en meses entre dos claves YYYY-MM. */
+function mesesEntre(a,b){
+  const [ya,ma]=a.split('-').map(Number),[yb,mb]=b.split('-').map(Number);
+  return (yb-ya)*12+(mb-ma);
+}
+function sumarMeses(ym,n){
+  const [y,m]=ym.split('-').map(Number);
+  const d=new Date(y,m-1+n,1);
+  return mesLocal(d);
+}
+
+/* ¿Este recurrente toca en este mes? Para los que no son mensuales, el mes
+   de arranque marca el ritmo: un semestral que empezó en marzo cae en
+   marzo y septiembre, no en enero y julio. */
+function tocaEnMes(r,mes){
+  if(!r.activo)return false;
+  const desde=(r.desde||'').slice(0,7);
+  if(desde&&mes<desde)return false;
+  const hasta=(r.hasta||'').slice(0,7);
+  if(hasta&&mes>hasta)return false;
+  const paso=mesesDelPeriodo(r.periodicidad);
+  if(paso===1)return true;
+  if(!desde)return true;
+  const dif=mesesEntre(desde,mes);
+  return dif>=0&&dif%paso===0;
+}
+
+/* ¿Este movimiento satisface este recurrente?
+   Si lo registraste desde la plantilla, el vínculo es explícito y no hay
+   nada que adivinar. Si lo anotaste a mano —que es lo normal— se empareja
+   por categoría y subcategoría, que en la práctica son únicas ('arriendo',
+   'seguro vehículo'). El monto NO entra en la comparación a propósito: la
+   energía y el gas cambian todos los meses y seguirían siendo el mismo
+   recibo. La diferencia de monto se muestra, no se usa para descartar. */
+function satisface(m,r){
+  if(m.recurrenteId)return m.recurrenteId===r.id;
+  if(!r.subcategoria)return false;
+  return m.categoria===r.categoria&&(m.subcategoria||'')===r.subcategoria;
+}
+
+/* Estado de un recurrente en un mes: qué se esperaba, qué se registró. */
+function estadoRecurrente(r,mes){
+  const movs=S.egresos.filter(m=>monthKey(m.fecha)===mes&&satisface(m,r));
+  const real=movs.reduce((a,b)=>a+b.monto,0);
+  return {r,movs,real,esperado:+r.monto||0,pagado:movs.length>0,
+          diferencia:movs.length?real-(+r.monto||0):0,
+          vinculado:movs.some(m=>m.recurrenteId===r.id)};
+}
+function estadoDelMes(mes){
+  return (S.recurrentes||[]).filter(r=>tocaEnMes(r,mes)).map(r=>estadoRecurrente(r,mes));
+}
+function pendientesDelMes(mes){
+  return estadoDelMes(mes||monthKey()).filter(e=>!e.pagado);
+}
+
+/* ── Detección automática ──────────────────────────────────
+   Igual que con el ámbito: la app propone y tú confirmas. La detección es
+   estadística y verificable, no una llamada a la IA — se muestra en cuántos
+   meses apareció y qué tan estable es el monto, para que la decisión se
+   tome mirando evidencia.
+
+   El coeficiente de variación (desviación / promedio) separa lo que de
+   verdad es fijo de lo que solo es frecuente: el arriendo tiene un cv
+   cercano a cero, el mercado semanal no. */
+function detectarRecurrentes(){
+  const grupos={};
+  (S.egresos||[]).forEach(e=>{
+    if(!e.subcategoria)return;                 // sin etiqueta no hay grupo fiable
+    /* La clave guarda los dos campos aparte en vez de concatenarlos: las
+       categorias COICOP llevan espacios y las subcategorias las escribes tu,
+       asi que cualquier separador podria aparecer dentro del texto. */
+    const k=e.categoria+'|'+e.subcategoria;
+    if(!grupos[k])grupos[k]={categoria:e.categoria,subcategoria:e.subcategoria,items:[]};
+    grupos[k].items.push(e);
+  });
+  const yaHay=r=>(S.recurrentes||[]).some(x=>x.categoria===r.categoria&&x.subcategoria===r.subcategoria);
+  const out=[];
+  for(const g of Object.values(grupos)){
+    const {categoria,subcategoria,items:arr}=g;
+    const meses=[...new Set(arr.map(e=>monthKey(e.fecha)))].sort();
+    if(meses.length<3)continue;
+    const montos=arr.map(e=>e.monto);
+    const prom=montos.reduce((a,b)=>a+b,0)/montos.length;
+    if(prom<20000)continue;                    // ruido: bolsas, mecato
+    const desv=Math.sqrt(montos.reduce((a,b)=>a+(b-prom)**2,0)/montos.length);
+    const cv=prom?desv/prom:1;
+    if(cv>0.6)continue;                        // demasiado variable para ser un fijo
+    if(yaHay({categoria,subcategoria}))continue;
+    const ult=arr.slice().sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+    out.push({categoria,subcategoria,meses:meses.length,desde:meses[0],
+      monto:Math.round(prom),cv,estable:cv<0.15,
+      cuentaId:ult.cuentaId||'',ambito:ambitoDe(ult),
+      diaDelMes:+ult.fecha.slice(8,10)||1,
+      metodo:ult.metodo||S.metodos[0]});
+  }
+  return out.sort((a,b)=>b.monto*b.meses-a.monto*a.meses);
+}
+
+registerModule({
+  id:'fijos',label:'Fijos',icon:'🔁',sub:'Gastos que se repiten mes a mes',
+  actions:`<button class="btn btn-outline btn-sm" onclick="proponerRecurrentes()">🔎 Detectar de mi historial</button>
+           <button class="btn btn-primary btn-sm" onclick="formRecurrente()">+ Nuevo fijo</button>`,
+  render(){
+    const mes=monthKey();
+    const est=estadoDelMes(mes);
+    if(!(S.recurrentes||[]).length){
+      return `<div class="card empty"><div class="empty-icon">🔁</div>
+        <h3 style="margin-bottom:8px">Todavía no has declarado ningún gasto fijo</h3>
+        <p style="color:var(--muted);margin-bottom:8px;max-width:52ch;margin-left:auto;margin-right:auto">
+          Un fijo declara lo que <b>debería</b> pasar cada mes. La app no lo inventa: lo compara
+          con lo que registraste y te avisa de lo que falta por pagar.</p>
+        <p style="color:var(--muted);margin-bottom:16px;font-size:.88rem">
+          Puedo buscarlos en tu historial y proponértelos.</p>
+        <button class="btn btn-primary" onclick="proponerRecurrentes()">🔎 Detectar de mi historial</button></div>`;
+    }
+    const pend=est.filter(e=>!e.pagado),listos=est.filter(e=>e.pagado);
+    const totalMes=est.reduce((a,e)=>a+e.esperado,0);
+    const faltaPagar=pend.reduce((a,e)=>a+e.esperado,0);
+    const desvio=listos.reduce((a,e)=>a+e.diferencia,0);
+
+    const fila=e=>{
+      const r=e.r;
+      const dif=e.pagado&&Math.abs(e.diferencia)>=1000;
+      return `<tr>
+        <td>${e.pagado?'<span class="badge green">✓ Pagado</span>':'<span class="badge orange">Pendiente</span>'}</td>
+        <td><div style="font-weight:600">${esc(r.concepto)}</div>
+            <div style="color:var(--muted);font-size:.74rem">${esc(r.categoria)}${r.subcategoria?' · '+esc(r.subcategoria):''}${ambitoDe(r)==='negocio'?' · 💼':''}</div></td>
+        <td style="color:var(--muted);font-size:.82rem">${etiquetaPeriodo(r.periodicidad)}${r.diaDelMes?'<br>día '+r.diaDelMes:''}</td>
+        <td style="text-align:right" class="amount">${fmtCOP(e.esperado)}</td>
+        <td style="text-align:right">${e.pagado
+          ? `<span class="amount">${fmtCOP(e.real)}</span>${dif?`<div style="font-size:.72rem;color:${e.diferencia>0?'var(--red)':'var(--green)'}">${e.diferencia>0?'+':'−'}${fmtCOP(Math.abs(e.diferencia))}</div>`:''}`
+          : '<span style="color:var(--muted)">—</span>'}</td>
+        <td style="white-space:nowrap">
+          ${e.pagado?'':`<button class="btn btn-success btn-sm" onclick="registrarDesdeFijo('${r.id}')">Registrar</button>`}
+          <button class="btn btn-ghost btn-sm" onclick="formRecurrente('${r.id}')" aria-label="Editar ${esc(r.concepto)}">✎</button>
+          <button class="btn btn-ghost btn-sm" onclick="delRecurrente('${r.id}')" aria-label="Eliminar ${esc(r.concepto)}">🗑</button>
+        </td></tr>`;
+    };
+
+    const inactivos=(S.recurrentes||[]).filter(r=>!r.activo);
+    return `
+      <div class="kpi-grid">
+        <div class="kpi"><div class="kpi-label">Comprometido este mes</div><div class="kpi-value">${fmtCOP(totalMes)}</div><div class="kpi-meta">${est.length} fijo(s) que tocan en ${fmtMonthLargo(mes)}</div></div>
+        <div class="kpi ${pend.length?'orange':'green'}"><div class="kpi-label">Falta por pagar</div><div class="kpi-value">${fmtCOP(faltaPagar)}</div><div class="kpi-meta">${pend.length?pend.length+' pendiente(s)':'Todo al día ✓'}</div></div>
+        <div class="kpi ${desvio>0?'red':''}"><div class="kpi-label">Desvío de lo pagado</div><div class="kpi-value" style="color:${desvio>0?'var(--red)':desvio<0?'var(--green)':'inherit'}">${desvio>0?'+':''}${fmtCOP(desvio)}</div><div class="kpi-meta">frente a lo esperado</div></div>
+      </div>
+
+      <div class="card"><h3>🔁 ${fmtMonthLargo(mes)}</h3>
+        ${est.length?`<div class="table-wrap"><table>
+          <thead><tr><th>Estado</th><th>Concepto</th><th>Ritmo</th><th style="text-align:right">Esperado</th><th style="text-align:right">Registrado</th><th></th></tr></thead>
+          <tbody>${pend.map(fila).join('')}${listos.map(fila).join('')}</tbody></table></div>`
+          :`<div class="empty">Ninguno de tus fijos toca en este mes.</div>`}
+        <p style="color:var(--muted);font-size:.8rem;margin-top:12px;line-height:1.5">
+          «Pagado» significa que hay un egreso de este mes con la misma categoría y subcategoría.
+          El monto no se usa para emparejar: la energía y el gas cambian todos los meses y siguen
+          siendo el mismo recibo. La diferencia se muestra, no descarta.</p>
+      </div>
+
+      ${inactivos.length?`<div class="card" style="margin-top:18px"><h3>⏸ Pausados</h3>
+        <div class="table-wrap"><table><thead><tr><th>Concepto</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
+        ${inactivos.map(r=>`<tr><td>${esc(r.concepto)}</td><td style="text-align:right" class="amount">${fmtCOP(r.monto)}</td>
+          <td><button class="btn btn-ghost btn-sm" onclick="formRecurrente('${r.id}')">✎</button>
+              <button class="btn btn-ghost btn-sm" onclick="delRecurrente('${r.id}')">🗑</button></td></tr>`).join('')}
+        </tbody></table></div></div>`:''}
+    `;
+  }
+});
+
+function formRecurrente(id){
+  const r=id?(S.recurrentes||[]).find(x=>x.id===id):null;
+  const d=r||{concepto:'',monto:'',categoria:S.catEgreso[0],subcategoria:'',metodo:S.metodos[0],
+    cuentaId:S.config.ultimaCuentaEg||'',ambito:'personal',periodicidad:'mensual',
+    diaDelMes:1,desde:monthKey()+'-01',hasta:'',activo:true};
+  openModal(`<h2>${id?'Editar':'Nuevo'} gasto fijo</h2>
+    <p style="color:var(--muted);font-size:.86rem;margin-bottom:14px">
+      Declara lo que se repite. No se registrará solo: cada mes te avisa si falta y tú confirmas.
+    </p>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
+      <div class="field" style="grid-column:1/-1"><label for="r-concepto">Concepto</label>
+        <input class="icone-input" id="r-concepto" value="${esc(d.concepto)}" placeholder="Arriendo, plan celular…"></div>
+      <div class="field"><label for="r-monto">Monto esperado (COP)</label>
+        <input type="number" step="any" class="icone-input" id="r-monto" value="${d.monto}" placeholder="0"></div>
+      <div class="field"><label for="r-dia">Día del mes</label>
+        <input type="number" min="1" max="31" class="icone-input" id="r-dia" value="${d.diaDelMes||1}"></div>
+      <div class="field"><label for="r-cat">Categoría</label>
+        <select class="icone-select" id="r-cat" onchange="refrescarSubcat(document.querySelector('#modal-content .sub-wrap'),this.value)">
+          ${S.catEgreso.map(c=>`<option ${d.categoria===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
+      <div class="field"><label>Subcategoría</label>${campoSubcat(d.categoria,d.subcategoria,'100%')}</div>
+      <div class="field"><label for="r-per">Cada cuánto</label>
+        <select class="icone-select" id="r-per">${PERIODOS.map(p=>`<option value="${p.id}" ${d.periodicidad===p.id?'selected':''}>${p.etiqueta}</option>`).join('')}</select></div>
+      <div class="field"><label for="r-desde">Empieza en</label>
+        <input type="month" class="icone-input" id="r-desde" value="${(d.desde||'').slice(0,7)}"></div>
+    </div>
+    ${campoAmbito(ambitoDe(d),'r-ambito')}
+    <div class="field" style="margin-top:12px"><label for="r-cuenta">¿De qué cuenta sale?</label>
+      <select class="icone-select" id="r-cuenta">
+        <option value="">— Sin especificar —</option>
+        ${S.cuentas.map(c=>`<option value="${c.id}" ${d.cuentaId===c.id?'selected':''}>${esc(c.alias||c.banco)}</option>`).join('')}
+      </select></div>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:14px;font-size:.9rem;cursor:pointer">
+      <input type="checkbox" id="r-activo" ${d.activo!==false?'checked':''}> Activo
+      <span style="color:var(--muted);font-size:.82rem">— desmárcalo para pausarlo sin borrar su historia</span>
+    </label>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveRecurrente('${id||''}')">Guardar</button>
+    </div>`);
+}
+
+function saveRecurrente(id){
+  const concepto=document.getElementById('r-concepto').value.trim();
+  if(!concepto)return toast('Ponle un concepto','error');
+  const monto=parseFloat(document.getElementById('r-monto').value);
+  if(isNaN(monto)||monto<=0)return toast('Monto inválido','error');
+  const desde=document.getElementById('r-desde').value;
+  const datos={
+    concepto,monto,
+    categoria:document.getElementById('r-cat').value,
+    subcategoria:valorSubcat(document.querySelector('#modal-content .sub-wrap')),
+    periodicidad:document.getElementById('r-per').value,
+    diaDelMes:Math.min(31,Math.max(1,parseInt(document.getElementById('r-dia').value)||1)),
+    desde:(desde||monthKey())+'-01',
+    cuentaId:document.getElementById('r-cuenta').value||'',
+    ambito:valorAmbito('r-ambito'),
+    activo:document.getElementById('r-activo').checked
+  };
+  aprenderSubcategoria(datos.categoria,datos.subcategoria);
+  S.recurrentes=S.recurrentes||[];
+  if(id){const r=S.recurrentes.find(x=>x.id===id);if(r)Object.assign(r,datos)}
+  else S.recurrentes.push({id:uid(),...datos,createdAt:new Date().toISOString()});
+  saveState();closeModal();rerender();toast('Fijo guardado');
+}
+
+function delRecurrente(id){
+  const r=(S.recurrentes||[]).find(x=>x.id===id);
+  if(!r)return;
+  if(!confirm(`¿Eliminar el fijo «${r.concepto}»?\n\nLos gastos ya registrados NO se borran: solo deja de esperarse cada mes.`))return;
+  S.recurrentes=S.recurrentes.filter(x=>x.id!==id);
+  /* Los movimientos que apuntaban a él se quedan, pero sueltan el vínculo:
+     un id muerto haría que un gasto real dejara de emparejar con nada. */
+  S.egresos.forEach(m=>{if(m.recurrenteId===id)delete m.recurrenteId});
+  saveState();rerender();toast('Fijo eliminado');
+}
+
+/* Registrar el gasto real desde la plantilla: abre el formulario de egreso
+   ya lleno y deja el vínculo puesto, para que la conciliación sea exacta y
+   no dependa de emparejar por texto. */
+let _desdeFijo=null;
+function registrarDesdeFijo(id){
+  const r=(S.recurrentes||[]).find(x=>x.id===id);
+  if(!r)return;
+  const dia=String(Math.min(r.diaDelMes||1,28)).padStart(2,'0');
+  formMov('eg');   // ojo: formMov limpia _desdeFijo, por eso se marca despues
+  setTimeout(()=>{
+    _desdeFijo=r.id;
+    const set=(el,v)=>{const e=document.getElementById(el);if(e)e.value=v};
+    set('f-fecha',monthKey()+'-'+dia);
+    set('f-monto',r.monto);
+    set('f-cat',r.categoria);
+    set('f-nota',r.concepto);
+    set('f-metodo',r.metodo||S.metodos[0]);
+    set('f-cuenta-mov',r.cuentaId||'');
+    elegirAmbito('f-ambito',ambitoDe(r));
+    const w=document.querySelector('#modal-content .sub-wrap');
+    if(w){refrescarSubcat(w,r.categoria);
+      if(r.subcategoria)w.querySelector('.sub-sel').innerHTML=opcionesSubcat(r.categoria,r.subcategoria)}
+    hintCuenta(r.cuentaId||'');
+  },60);
+}
+
+/* ── Proponer fijos a partir del historial ────────────────── */
+let _propFijos=null;
+function proponerRecurrentes(){
+  const c=detectarRecurrentes();
+  _propFijos=c;
+  if(!c.length){
+    return openModal(`<h2>No encontré fijos nuevos</h2>
+      <p style="color:var(--muted);margin:12px 0">Busco gastos con la misma subcategoría en 3 o más meses
+      y con monto estable. O ya los declaraste todos, o todavía no hay historia suficiente.</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+        <button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>
+        <button class="btn btn-primary" onclick="formRecurrente()">Crear uno a mano</button></div>`);
+  }
+  const total=c.filter(x=>x.estable).reduce((a,x)=>a+x.monto,0);
+  openModal(`<h2>🔁 ${c.length} gasto(s) que se repiten</h2>
+    <p style="color:var(--muted);font-size:.88rem;margin:8px 0 12px">
+      Salen de tu propio historial: misma subcategoría en 3 meses o más. Los marcados como
+      <b style="color:var(--green)">fijos</b> tienen un monto casi idéntico mes a mes
+      (${fmtCOP(total)} al mes entre todos); los <b style="color:var(--yellow)">variables</b> se repiten
+      pero cambian de valor, como la energía. Desmarca los que no quieras declarar.
+    </p>
+    <div class="table-wrap" id="pf-tabla" style="max-height:44vh;overflow:auto">
+      <table><thead><tr><th></th><th>Concepto</th><th>Evidencia</th><th style="text-align:right">Monto típico</th></tr></thead><tbody>
+      ${c.map((x,i)=>`<tr data-i="${i}">
+        <td><input type="checkbox" class="pf-chk" ${x.estable?'checked':''}></td>
+        <td><div style="font-weight:600">${esc(x.subcategoria)}</div>
+            <div style="color:var(--muted);font-size:.74rem">${esc(x.categoria)}</div></td>
+        <td style="font-size:.78rem">
+          <span class="badge ${x.estable?'green':'orange'}">${x.estable?'fijo':'variable'}</span>
+          <div style="color:var(--muted);margin-top:3px">${x.meses} meses · desde ${fmtMonthLargo(x.desde)}</div>
+          <div style="color:var(--muted)">variación ±${Math.round(x.cv*100)}%</div></td>
+        <td style="text-align:right" class="amount">${fmtCOP(x.monto)}</td>
+      </tr>`).join('')}
+      </tbody></table>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="aplicarPropuestaFijos()">Declarar seleccionados</button>
+    </div>`);
+}
+
+function aplicarPropuestaFijos(){
+  let n=0;
+  S.recurrentes=S.recurrentes||[];
+  document.querySelectorAll('#pf-tabla tbody tr').forEach(tr=>{
+    if(!tr.querySelector('.pf-chk').checked)return;
+    const x=_propFijos[+tr.dataset.i];
+    if(!x)return;
+    S.recurrentes.push({id:uid(),concepto:x.subcategoria,monto:x.monto,
+      categoria:x.categoria,subcategoria:x.subcategoria,metodo:x.metodo,
+      cuentaId:x.cuentaId,ambito:x.ambito,periodicidad:'mensual',
+      diaDelMes:x.diaDelMes,desde:x.desde+'-01',activo:true,
+      createdAt:new Date().toISOString(),detectado:true});
+    n++;
+  });
+  _propFijos=null;
+  saveState();closeModal();go('fijos');
+  toast(`✓ ${n} gasto(s) fijo(s) declarado(s)`);
 }
 
 /* ═══════════════════════════════════════════════════════════
