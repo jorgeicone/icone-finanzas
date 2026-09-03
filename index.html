@@ -302,7 +302,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.33</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.34</b></div>
       <div style="margin-top:2px">Build 2026-09-02</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -1839,7 +1839,9 @@ const fechaAnotado=m=>m.createdAt?fechaLocal(new Date(m.createdAt)):null;
 function renderMovList(tipo){
   const arr=tipo==='ing'?S.ingresos:S.egresos;
   const cats=tipo==='ing'?S.catIngreso:S.catEgreso;
-  const totMes=arr.filter(x=>monthKey(x.fecha)===monthKey()).reduce((a,b)=>a+b.monto,0);
+  const delMesActual=arr.filter(x=>monthKey(x.fecha)===monthKey());
+  const totMes=delMesActual.reduce((a,b)=>a+b.monto,0);
+  const nMes=delMesActual.length;
   const totTot=arr.reduce((a,b)=>a+b.monto,0);
   // agregados por categoría
   const porCat={};arr.forEach(x=>{porCat[x.categoria]=(porCat[x.categoria]||0)+x.monto});
@@ -1884,23 +1886,35 @@ function renderMovList(tipo){
       <b style="color:#fff">${visibles.length}</b> de ${arr.length} movimiento(s) ·
       suma <b class="amount ${tipo==='ing'?'pos':'neg'}">${fmtCOP(totVisible)}</b></div>`:''}`;
 
-  return `
-    <div class="kpi-grid">
-      <div class="kpi ${tipo==='ing'?'green':'red'}"><div class="kpi-label">Total del mes</div><div class="kpi-value">${fmtCOP(totMes)}</div></div>
-      <div class="kpi"><div class="kpi-label">Total histórico</div><div class="kpi-value">${fmtCOP(totTot)}</div><div class="kpi-meta">${arr.length} registro(s)</div></div>
-      <div class="kpi orange"><div class="kpi-label">Promedio mensual</div><div class="kpi-value">${fmtCOP(avgMonthly(arr))}</div></div>
-    </div>
-    <div class="grid-2">
-      <div class="card"><h3>📊 Por categoría <span style="color:var(--muted);font-size:.75rem;font-weight:400">${tipo==='eg'?'· toca una barra para ver sus subcategorías':''}</span></h3>${Object.keys(porCat).length?`<div class="chart-wrap-sm"><canvas id="ch-cat-${tipo}"></canvas></div>`:'<div class="empty">Sin datos</div>'}</div>
-      <div class="card"><h3>📅 Últimos 6 meses</h3><div class="chart-wrap-sm"><canvas id="ch-mov-${tipo}"></canvas></div></div>
-    </div>
-    <div class="card" style="margin-top:18px"><h3>📋 Movimientos</h3>
+  /* La tabla va ANTES de las graficas: es el registro, y las graficas
+     son comentario sobre el. Estaba al final y en una pantalla de portatil
+     quedaba debajo del pliegue, asi que lo primero que se veia al abrir
+     Egresos era un /usr/bin/bash del mes en curso y ningun movimiento. */
+  const tablaMovs=`
+    <div class="card"><h3>📋 Movimientos</h3>
       ${barraFiltros}
       ${visibles.length?`<div class="table-wrap"><table><thead><tr><th>Fecha del gasto</th><th>Categoría</th><th>${tipo==='ing'?'Fuente':'Método'}</th><th>Nota</th><th>Recibos</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
         ${[...visibles].sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(m=>`<tr><td><div style="font-weight:600">${fmtDate(m.fecha)}</div>${fechaAnotado(m)&&fechaAnotado(m)!==m.fecha?`<div style="color:var(--muted);font-size:.7rem;margin-top:2px">anotado el ${fmtDate(fechaAnotado(m))}</div>`:''}</td><td><span class="badge ${tipo==='ing'?'green':'orange'}">${esc(m.categoria)}</span>${ambitoDe(m)==='negocio'?' <span class="badge negocio">💼 Negocio</span>':''}${m.subcategoria?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">${esc(m.subcategoria)}</div>`:''}</td><td>${esc(tipo==='ing'?(m.fuente||'—'):(m.metodo||'—'))}${m.cuentaId&&nombreCuenta(m.cuentaId)?`<div style="color:var(--muted);font-size:.72rem;margin-top:3px">🏦 ${esc(nombreCuenta(m.cuentaId))}</div>`:''}</td><td style="color:var(--muted);font-size:.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.nota||'—')}</td><td>${(m.recibos||[]).length?`<span class="badge purple">📎 ${m.recibos.length}</span>`:'—'}</td><td style="text-align:right" class="amount ${tipo==='ing'?'pos':'neg'}">${tipo==='ing'?'+':'-'}${fmtCOP(m.monto)}</td><td><button class="btn btn-ghost btn-sm" onclick="formMov('${tipo}','${m.id}')" aria-label="Editar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">✎</button><button class="btn btn-ghost btn-sm" onclick="delMov('${tipo}','${m.id}')" aria-label="Eliminar el movimiento del ${fmtDate(m.fecha)} por ${fmtCOP(m.monto)}">🗑</button></td></tr>`).join('')}
       </tbody></table></div>`:(arr.length
         ?`<div class="empty"><div class="empty-icon">🔍</div>Ningún movimiento coincide con el filtro.</div>`
         :`<div class="empty"><div class="empty-icon">${tipo==='ing'?'💵':'💸'}</div>No hay ${tipo==='ing'?'ingresos':'egresos'} registrados</div>`)}
+    </div>
+  `;
+
+  return `
+    <div class="kpi-grid">
+      <div class="kpi ${tipo==='ing'?'green':'red'}"><div class="kpi-label">Total del mes</div><div class="kpi-value">${fmtCOP(totMes)}</div><div class="kpi-meta">${nMes
+        ? `${nMes} registro(s) en ${fmtMonthLargo(monthKey())}`
+        : (arr.length
+            ? `<span style="color:var(--muted)">Nada anotado aún en ${fmtMonthLargo(monthKey())} · tu historial sigue abajo</span>`
+            : 'Sin registros')}</div></div>
+      <div class="kpi"><div class="kpi-label">Total histórico</div><div class="kpi-value">${fmtCOP(totTot)}</div><div class="kpi-meta">${arr.length} registro(s)</div></div>
+      <div class="kpi orange"><div class="kpi-label">Promedio mensual</div><div class="kpi-value">${fmtCOP(avgMonthly(arr))}</div></div>
+    </div>
+    ${tablaMovs}
+    <div class="grid-2">
+      <div class="card"><h3>📊 Por categoría <span style="color:var(--muted);font-size:.75rem;font-weight:400">${tipo==='eg'?'· toca una barra para ver sus subcategorías':''}</span></h3>${Object.keys(porCat).length?`<div class="chart-wrap-sm"><canvas id="ch-cat-${tipo}"></canvas></div>`:'<div class="empty">Sin datos</div>'}</div>
+      <div class="card"><h3>📅 Últimos 6 meses</h3><div class="chart-wrap-sm"><canvas id="ch-mov-${tipo}"></canvas></div></div>
     </div>
   `;
 }
