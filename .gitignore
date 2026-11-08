@@ -12,3 +12,6 @@ img/anterior/
 
 # El seed traia saldos reales. Vive fuera del repo, en "6. Finanzas - respaldos".
 seed-*.json
+
+# Cache local de wrangler (despliegue a Cloudflare Pages). No va al repo.
+.wrangler/

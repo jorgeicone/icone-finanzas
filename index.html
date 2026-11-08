@@ -305,8 +305,8 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.35</b></div>
-      <div style="margin-top:2px">Build 2026-09-02</div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.36</b></div>
+      <div style="margin-top:2px">Build 2026-11-08</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
   </aside>
@@ -919,6 +919,9 @@ function dbPut(rec){return new Promise((res,rej)=>{const tx=DB.transaction('reci
 function dbGet(id){return new Promise((res,rej)=>{const tx=DB.transaction('recibos','readonly');const r=tx.objectStore('recibos').get(id);r.onsuccess=()=>res(r.result);r.onerror=rej})}
 function dbAll(){return new Promise((res,rej)=>{const tx=DB.transaction('recibos','readonly');const r=tx.objectStore('recibos').getAll();r.onsuccess=()=>res(r.result);r.onerror=rej})}
 function dbDel(id){return new Promise((res,rej)=>{const tx=DB.transaction('recibos','readwrite');tx.objectStore('recibos').delete(id);tx.oncomplete=()=>res();tx.onerror=rej})}
+/* Solo los ids, sin las fotos. Con 145 recibos de ~600 KB, dbAll() metía
+   unos 90 MB de texto en la memoria de una pestaña de iPhone. */
+function dbClaves(){return new Promise((res,rej)=>{const tx=DB.transaction('recibos','readonly');const r=tx.objectStore('recibos').getAllKeys();r.onsuccess=()=>res(r.result);r.onerror=rej})}
 
 /* ═══════════════════════════════════════════════════════════
    RECIBOS EN LA NUBE
@@ -947,16 +950,110 @@ function blobADataUrl(blob){
   return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=rej;fr.readAsDataURL(blob)});
 }
 
-async function subirRecibo(rec){
+/* ── Subida de una foto ──────────────────────────────────────
+   Diagnóstico del 8 de noviembre de 2026, sobre los registros del servidor:
+   72 fotos subidas en 95 minutos desde un iPhone, todas con respuesta 200 y
+   0,8 s promedio de proceso en el servidor. El tiempo se iba en el teléfono:
+   ~48 s por foto de ~600 KB (una subida de unos 100 kbps), pausas de 10 y 12
+   minutos cuando la pantalla se bloqueaba, y después de la foto 72 no llegó
+   ninguna petición más. Tres causas, tres arreglos:
+
+   1. Se subía la foto tal como estaba guardada. Se re-codifica a 1280 px y
+      calidad 0,74 antes de enviarla: un recibo se lee perfecto y pesa
+      alrededor de un tercio. La copia del teléfono no se toca.
+   2. La subida no tenía tope de tiempo. iOS congela Safari al bloquear la
+      pantalla y, al volver, la conexión que iba en curso está muerta pero la
+      promesa nunca termina: el bucle quedaba esperándola para siempre con el
+      contador detenido. Ahora va por fetch con AbortController y un tope.
+   3. Se tomaba el token una sola vez. Tras una suspensión larga el refresco
+      automático puede no haber corrido: getSession() lo renueva antes de
+      cada foto si hace falta. */
+const TOPE_SUBIDA_MS=120000;
+
+function comprimirParaSubir(dataUrl,maxLado=1280,calidad=0.74){
+  return new Promise(res=>{
+    const original=()=>res(dataUrlABlob(dataUrl));
+    const img=new Image();
+    img.onerror=original;
+    img.onload=()=>{
+      try{
+        let w=img.naturalWidth,h=img.naturalHeight;
+        const esc=Math.min(1,maxLado/Math.max(w,h));
+        w=Math.round(w*esc);h=Math.round(h*esc);
+        const c=document.createElement('canvas');c.width=w;c.height=h;
+        const cx=c.getContext('2d');cx.fillStyle='#fff';cx.fillRect(0,0,w,h);cx.drawImage(img,0,0,w,h);
+        c.toBlob(b=>{
+          c.width=c.height=0;                      // iOS no suelta el canvas solo
+          if(!b||b.size>=dataUrl.length*0.75)return original();  // ya venía liviana
+          res(b);
+        },'image/jpeg',calidad);
+      }catch(_){original()}
+    };
+    img.src=dataUrl;
+  });
+}
+
+/* `seguir` es el estado de la subida masiva: se le cuelga el controlador
+   de la petición en curso para poder cortarla desde fuera (botón Detener,
+   o al volver de segundo plano). */
+async function subirRecibo(rec,{seguir}={}){
   if(!sb||!currentUser||!rec||!rec.data)return false;
+  let ctrl=null,reloj=null;
   try{
-    const {error}=await sb.storage.from(BUCKET_RECIBOS)
-      .upload(rutaRecibo(rec.id),dataUrlABlob(rec.data),{contentType:'image/jpeg',upsert:true});
-    if(error)throw error;
+    const {data:{session}}=await sb.auth.getSession();
+    if(!session)return false;
+    const blob=await comprimirParaSubir(rec.data);
+    ctrl=new AbortController();
+    if(seguir)seguir.ctrl=ctrl;
+    reloj=setTimeout(()=>ctrl.abort(),TOPE_SUBIDA_MS);
+    const r=await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET_RECIBOS}/${rutaRecibo(rec.id)}`,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+session.access_token,'apikey':SUPABASE_ANON_KEY,
+               'Content-Type':'image/jpeg','x-upsert':'true'},
+      body:blob,signal:ctrl.signal
+    });
+    if(!r.ok)throw new Error('HTTP '+r.status);
     rec.nube=true;await dbPut(rec);
     return true;
-  }catch(e){console.error('Recibo no subido:',e.message);return false}
+  }catch(e){
+    console.warn('Recibo no subido',rec.id,e.name==='AbortError'?'(cortado)':e.message);
+    return false;
+  }finally{
+    clearTimeout(reloj);
+    if(seguir&&seguir.ctrl===ctrl)seguir.ctrl=null;
+  }
 }
+
+/* ── Cola en segundo plano ─────────────────────────────────
+   Guardar un gasto ya NO espera a que suba la foto. Antes sí: saveMov y el
+   escáner hacían await de la subida antes de guardar, así que con señal
+   lenta el formulario quedaba pegado medio minuto por foto, y si la
+   petición se colgaba el gasto no se guardaba nunca. Ahora se guarda en el
+   teléfono al instante y la foto sube detrás, una a la vez. */
+const _colaSubida=[];let _colaCorriendo=false;
+function encolarSubida(rec){
+  if(!rec)return;
+  _colaSubida.push(rec);
+  if(_colaCorriendo)return;
+  _colaCorriendo=true;
+  (async()=>{
+    while(_colaSubida.length)await subirRecibo(_colaSubida.shift());
+    _colaCorriendo=false;
+  })();
+}
+
+/* Pantalla encendida mientras sube un lote. iOS suelta el bloqueo cada vez
+   que Safari pasa a segundo plano, así que se vuelve a pedir al regresar. */
+let _wakeLock=null;
+async function mantenerPantalla(){
+  try{
+    if('wakeLock' in navigator&&!_wakeLock){
+      _wakeLock=await navigator.wakeLock.request('screen');
+      _wakeLock.addEventListener('release',()=>{_wakeLock=null});
+    }
+  }catch(_){}
+}
+function soltarPantalla(){try{_wakeLock&&_wakeLock.release()}catch(_){}_wakeLock=null}
 
 async function bajarRecibo(id){
   if(!sb||!currentUser)return null;
@@ -991,23 +1088,111 @@ async function borrarRecibo(id){
   await borrarReciboEnNube(id);
 }
 
-/* Sube de una las fotos que todavía no tienen copia en el servidor: las de
-   antes de esta versión, y las que fallaron por estar sin señal. */
-async function sincronizarRecibos(silencioso){
-  if(!currentUser)return silencioso?null:toast('Inicia sesión primero en Configuración','error');
-  const todos=await dbAll();
-  const faltan=todos.filter(r=>!r.nube&&r.data);
-  if(!faltan.length)return silencioso?null:toast('Todos los recibos ya están respaldados');
-  let n=0;
-  for(const r of faltan){
-    if(await subirRecibo(r))n++;
-    const el=document.getElementById('rec-sync-estado');
-    if(el)el.textContent=`Subiendo… ${n} de ${faltan.length}`;
-  }
+/* ── Subida por lote ───────────────────────────────────────
+   Sube las fotos que todavía no tienen copia en el servidor. Cambios frente
+   a la versión que se quedaba pegada:
+
+   - Lee una foto a la vez en vez de cargarlas todas con dbAll().
+   - El progreso vive en _subida, no en el texto de la pantalla. Antes, cada
+     vez que volvías a la app se repintaba Configuración y el contador
+     desaparecía hasta la siguiente foto: parecía detenido aunque no lo
+     estuviera.
+   - Cuenta lo que falló aparte de lo que subió. Antes solo se mostraban las
+     exitosas, así que una racha de fallos se veía idéntica a un bloqueo.
+   - Es reanudable: cada foto subida queda marcada, y volver a tocar el botón
+     sigue donde quedó. */
+let _subida=null;   // {activa,total,hechas,fallidas,msAcum,ctrl,detener,reintentar,quedan,resumen}
+
+function pintarProgresoSubida(){
   const el=document.getElementById('rec-sync-estado');
-  if(el)el.textContent=n===faltan.length?`✓ ${n} recibo(s) respaldado(s)`:`${n} de ${faltan.length} subidos · reintenta con mejor señal`;
-  if(!silencioso)toast(`☁️ ${n} de ${faltan.length} recibo(s) respaldado(s)`);
-  return n;
+  const btn=document.getElementById('rec-sync-btn');
+  if(!el)return;
+  const s=_subida;
+  if(btn)btn.textContent=s&&s.activa?'⏹ Detener':(s&&s.quedan?'☁️ Continuar subida':'☁️ Subir recibos pendientes');
+  if(!s){el.textContent='';return}
+  if(!s.activa){el.innerHTML=s.resumen||'';return}
+  const listos=s.hechas+s.fallidas,quedan=Math.max(0,s.total-listos);
+  const prom=s.hechas?s.msAcum/s.hechas:0;
+  const min=prom?Math.max(1,Math.round(prom*quedan/60000)):null;
+  el.innerHTML=`<b style="color:#fff">${s.hechas}</b> de ${s.total} subidas`
+    +(s.fallidas?` · <span style="color:var(--orange)">${s.fallidas} para reintentar</span>`:'')
+    +(min!==null&&quedan?` · faltan unos ${min} min`:'')
+    +`<div style="font-size:.78rem;margin-top:4px">Deja Safari abierto y en primer plano. Si se interrumpe, vuelve a tocar el botón: sigue donde quedó.</div>`;
+}
+
+function botonSubida(){
+  if(_subida&&_subida.activa)return detenerSubida();
+  sincronizarRecibos();
+}
+function detenerSubida(){
+  if(!_subida||!_subida.activa)return;
+  _subida.detener=true;
+  try{_subida.ctrl&&_subida.ctrl.abort()}catch(_){}
+}
+
+/* Al volver de segundo plano: la petición que iba en vuelo cuando iOS
+   congeló la página casi seguro murió con su conexión. Se corta ya y se
+   reintenta esa misma foto, en vez de esperar el tope de dos minutos. */
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible'||!_subida||!_subida.activa)return;
+  mantenerPantalla();
+  if(_subida.ctrl){_subida.reintentar=true;try{_subida.ctrl.abort()}catch(_){}}
+});
+
+async function sincronizarRecibos(){
+  if(!currentUser)return toast('Inicia sesión primero en Configuración','error');
+  if(_subida&&_subida.activa)return;            // ya hay una en curso
+
+  const el=document.getElementById('rec-sync-estado');
+  if(el)el.textContent='Revisando qué falta…';
+  const claves=await dbClaves();
+  const pendientes=[];
+  for(const k of claves){const r=await dbGet(k);if(r&&r.data&&!r.nube)pendientes.push(k)}
+  if(!pendientes.length){
+    _subida=null;pintarProgresoSubida();contarRecibosPendientes();
+    return toast('Todos los recibos ya están respaldados');
+  }
+
+  const s=_subida={activa:true,total:pendientes.length,hechas:0,fallidas:0,msAcum:0,
+                   ctrl:null,detener:false,reintentar:false,quedan:0,resumen:''};
+  await mantenerPantalla();
+  pintarProgresoSubida();
+
+  for(const k of pendientes){
+    if(s.detener)break;
+    const r=await dbGet(k);
+    if(!r||r.nube||!r.data){s.total--;pintarProgresoSubida();continue}
+    let ok=false;
+    // Un reintento, y solo si la foto se cortó por volver de segundo plano:
+    // un fallo de red real o un tope agotado no se insisten aquí.
+    for(let intento=0;intento<2&&!ok&&!s.detener;intento++){
+      s.reintentar=false;
+      const t0=performance.now();
+      ok=await subirRecibo(r,{seguir:s});
+      if(ok)s.msAcum+=performance.now()-t0;
+      else if(!s.reintentar)break;
+    }
+    if(ok)s.hechas++;else if(!s.detener)s.fallidas++;
+    pintarProgresoSubida();
+  }
+  soltarPantalla();
+
+  /* Fotos de este aparato que ningún movimiento usa. Casi siempre son gastos
+     que no alcanzaron a guardarse: hasta la v0.35 guardar esperaba a que la
+     foto subiera, y si la petición se colgaba el gasto nunca se escribía. */
+  const usadas=new Set([...S.egresos,...S.ingresos].flatMap(m=>m.recibos||[]));
+  const huerfanas=claves.filter(k=>!usadas.has(k)).length;
+
+  s.activa=false;s.ctrl=null;
+  s.quedan=Math.max(0,s.total-s.hechas);
+  s.resumen=(s.detener&&s.quedan
+      ?`Detenida: ${s.hechas} subida(s), quedan ${s.quedan}. Toca el botón para continuar.`
+      :s.quedan
+        ?`${s.hechas} subida(s) · <span style="color:var(--orange)">${s.quedan} no pasaron</span>. Vuelve a intentar con mejor señal; sigue donde quedó.`
+        :`<span style="color:var(--green)">✓ ${s.hechas} recibo(s) respaldado(s).</span>`)
+    +(huerfanas?`<div style="color:var(--yellow);margin-top:6px;font-size:.82rem">${huerfanas} foto(s) de este dispositivo no están ligadas a ningún movimiento. Puede ser un gasto que no alcanzó a guardarse: búscalas en Recibos, aparecen como «Sin vincular».</div>`:'');
+  pintarProgresoSubida();contarRecibosPendientes();
+  toast(s.quedan?`☁️ ${s.hechas} subidas · faltan ${s.quedan}`:`☁️ ${s.hechas} recibo(s) respaldado(s)`);
 }
 
 /* ---------- TOAST ---------- */
@@ -2099,10 +2284,14 @@ async function saveMov(tipo,id){
     else S.config.ultimaCuentaEg=data.cuentaId;
   }
 
-  /* Cada foto se guarda local Y se sube. Si no hay sesión o no hay señal,
-     queda marcada como pendiente y sube después desde Configuración. */
-  for(const r of _pendingRecibos){await dbPut(r);await subirRecibo(r)}
-  for(const rid of (_removedExisting||[])){await borrarRecibo(rid)}
+  /* Guardar NUNCA espera a la red. La foto se escribe en el teléfono y sube
+     por detrás. Hasta la v0.35 aquí había un await de la subida: con señal
+     lenta el formulario quedaba pegado ~48 s por foto, y si la petición se
+     colgaba el gasto no llegaba a guardarse. Lo mismo con el borrado: se
+     borra local al instante y en la nube cuando haya conexión. */
+  for(const r of _pendingRecibos)await dbPut(r);
+  for(const rid of (_removedExisting||[])){await dbDel(rid);borrarReciboEnNube(rid)}
+  const aSubir=_pendingRecibos.slice();
 
   const arr=tipo==='ing'?S.ingresos:S.egresos;
   if(id){
@@ -2118,6 +2307,7 @@ async function saveMov(tipo,id){
   }
   _pendingRecibos=[];_removedExisting=[];_desdeFijo=null;
   saveState();closeModal();rerender();toast('Movimiento guardado');
+  aSubir.forEach(encolarSubida);
 }
 
 function delMov(tipo,id){
@@ -2901,7 +3091,7 @@ async function guardarEscaneo(){
 
   // La foto queda como recibo, ligada a cada gasto que salió de ella.
   const rec={id:uid(),data:_escaneo.imagen.dataUrl,name:'escaneo-'+today()+'.jpg',size:_escaneo.imagen.dataUrl.length,createdAt:new Date().toISOString()};
-  await dbPut(rec);await subirRecibo(rec);
+  await dbPut(rec);   // la subida va al final, en segundo plano: guardar no espera a la red
 
   const comercio=(document.getElementById('esc-comercio').value||'').trim();
   const pre=comercio?comercio+' · ':'';
@@ -2931,6 +3121,7 @@ async function guardarEscaneo(){
   _escaneo=null;
   saveState();closeModal();rerender();
   toast(`✓ ${n} gasto${n>1?'s':''} guardado${n>1?'s':''} desde la factura`);
+  encolarSubida(rec);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -3495,14 +3686,14 @@ function renderConfig(){
     <div class="card" style="margin-bottom:18px">
       <h3>🧾 Respaldo de los recibos</h3>
       <p style="color:var(--muted);font-size:.9rem;margin-bottom:12px">
-        Hasta la v0.28 las fotos vivían solo en este dispositivo: no viajaban a tus otros
-        aparatos y el navegador podía borrarlas. Ahora cada foto nueva se sube sola al
-        servidor. Las de antes hay que subirlas una vez, desde cada dispositivo donde
-        tengas recibos guardados.
+        Cada foto nueva sube sola, por detrás, sin hacerte esperar. Las que guardaste antes
+        hay que subirlas una vez desde el dispositivo donde están. En el celular, deja la
+        app abierta en primer plano mientras sube: si la cierras o se bloquea la pantalla,
+        se pausa, y al volver a tocar el botón sigue donde quedó.
       </p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-        <button class="btn btn-primary" onclick="sincronizarRecibos()">☁️ Subir recibos pendientes</button>
-        <span id="rec-sync-estado" style="font-size:.86rem;color:var(--muted)"></span>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start">
+        <button class="btn btn-primary" id="rec-sync-btn" onclick="botonSubida()">☁️ Subir recibos pendientes</button>
+        <div id="rec-sync-estado" style="font-size:.86rem;color:var(--muted);flex:1;min-width:200px;line-height:1.5"></div>
       </div>
       <div id="rec-sync-conteo" style="margin-top:10px;font-size:.82rem;color:var(--muted)"></div>
     </div>
@@ -3562,6 +3753,7 @@ function renderConfig(){
     </div>
   `;
   contarRecibosPendientes();
+  pintarProgresoSubida();   // el progreso de una subida en curso sobrevive al repintado
 }
 /* ── Separar la historia vieja ──────────────────────────────
    Marcar 285 movimientos a mano no lo hace nadie, así que la app propone.
@@ -3649,11 +3841,13 @@ function aplicarAmbitoHistorico(){
 async function contarRecibosPendientes(){
   const el=document.getElementById('rec-sync-conteo');
   if(!el)return;
-  const todos=await dbAll();
+  // Una a la vez: abrir Configuración ya no carga todas las fotos a memoria.
+  const claves=await dbClaves();
+  let faltan=0;
+  for(const k of claves){const r=await dbGet(k);if(r&&!r.nube)faltan++}
   if(!document.getElementById('rec-sync-conteo'))return;
-  const faltan=todos.filter(r=>!r.nube).length;
-  el.textContent=todos.length
-    ? `${todos.length} foto(s) en este dispositivo · ${faltan?faltan+' sin respaldar':'todas respaldadas ✓'}`
+  el.textContent=claves.length
+    ? `${claves.length} foto(s) en este dispositivo · ${faltan?faltan+' sin respaldar':'todas respaldadas ✓'}`
     : 'No hay fotos guardadas en este dispositivo.';
 }
 
@@ -3686,11 +3880,21 @@ function importData(e){
     }catch(err){toast('Archivo inválido','error')}
   };r.readAsText(f);
 }
+/* Borra la copia de ESTE dispositivo. Desde la v0.29 también borraba las
+   fotos del servidor, y eso era un error: el estado de la nube no se toca
+   aquí, así que al volver a entrar los gastos regresaban apuntando a fotos
+   que ya no existían en ningún aparato. Ahora es solo local, y avisa si hay
+   fotos que todavía no subieron, porque esas sí se perderían. */
 async function wipeAll(){
-  if(!confirm('⚠️ Esto borrará TODOS tus datos y recibos. ¿Continuar?'))return;
-  if(!confirm('Esta acción NO se puede deshacer. ¿Seguro?'))return;
+  const claves=await dbClaves();
+  let sinSubir=0;
+  for(const k of claves){const r=await dbGet(k);if(r&&!r.nube)sinSubir++}
+  if(!confirm('Se borrarán los datos guardados en ESTE dispositivo. Lo que esté en la nube vuelve al iniciar sesión.'
+    +(sinSubir?`\n\n⚠️ Hay ${sinSubir} foto(s) de recibos que todavía NO están en la nube. Esas se perderán para siempre. Súbelas primero desde Configuración.`:'')
+    +'\n\n¿Continuar?'))return;
+  if(sinSubir&&!confirm(`Última confirmación: ${sinSubir} foto(s) se perderán. ¿Seguro?`))return;
   localStorage.removeItem(STORE_KEY);localStorage.removeItem(STORE_KEY+'_modules');
-  const all=await dbAll();for(const r of all)await borrarRecibo(r.id);
+  for(const k of claves)await dbDel(k);
   location.reload();
 }
 async function forceReset(){
@@ -3698,7 +3902,9 @@ async function forceReset(){
      bajar de la nube. Si no hay sesión iniciada, la app arranca vacía. */
   if(!confirm('Se borrarán los datos guardados en ESTE dispositivo y se volverán a bajar de la nube.\n\nSi no has iniciado sesión, la app quedará vacía y tendrás que importar un respaldo. ¿Continuar?'))return;
   localStorage.clear();
-  const all=await dbAll();for(const r of all)await dbDel(r.id);
+  /* Las fotos NO se borran. Rehacer la copia local es rehacer el estado; las
+     fotos son caché por id y siguen siendo válidas. Borrarlas solo servía
+     para perder para siempre las que todavía no habían subido. */
   // forzar bypass de caché agregando timestamp a la URL
   location.href=location.pathname+'?v='+Date.now();
 }

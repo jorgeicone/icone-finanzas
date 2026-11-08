@@ -21,7 +21,7 @@
                  guardarlas sería servir saldos viejos, o los de otra sesión.
    ============================================================ */
 
-const VERSION = 'v0.35';
+const VERSION = 'v0.36';
 const CACHE = 'icone-finanzas-' + VERSION;
 
 const ESENCIALES = [
