@@ -321,7 +321,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.39</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.40</b></div>
       <div style="margin-top:2px">Build 2026-11-08</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -705,6 +705,15 @@ async function pullFromCloud(forceOverwrite=false){
          true, así que antes esta subida —y la de más abajo— nunca ocurrían.
          La app incluso anunciaba «subimos a la nube» sin haber subido. */
       isPulling=false;
+      /* Pero si este dispositivo tampoco tiene nada, no hay nada que subir:
+         lo más probable es que entraste con un correo distinto al de tus
+         datos. Pasó el 8 de noviembre de 2026: un magic link con otro correo
+         abrió una cuenta vacía y la app quedó en blanco sin decir por qué. */
+      if(!contarRegistros(S)){
+        setSyncStatus('local','Cuenta sin datos');
+        avisarCuentaVacia();
+        return;
+      }
       await pushToCloud();
       return;
     }
@@ -845,6 +854,19 @@ document.addEventListener('visibilitychange',()=>{
     pullFromCloud();
   }
 });
+
+function avisarCuentaVacia(){
+  openModal(`<h2>Esta cuenta no tiene datos</h2>
+    <p style="margin:12px 0;line-height:1.55">Entraste como <b style="color:var(--cyan)">${esc(currentUser&&currentUser.email||'')}</b>,
+      y en la nube no hay nada guardado con ese correo.</p>
+    <p style="color:var(--muted);font-size:.9rem;line-height:1.55;margin-bottom:16px">
+      Si tus finanzas están en otro correo, sal y entra con ese. No se borró nada: cada correo
+      tiene sus propios datos, y los tuyos siguen donde estaban.</p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="closeModal()">Quedarme así</button>
+      <button class="btn btn-primary" onclick="closeModal();logoutSupabase()">Salir y entrar con otro correo</button>
+    </div>`);
+}
 
 async function sendMagicLink(){
   const email=document.getElementById('login-email').value.trim();
@@ -4442,7 +4464,7 @@ function registrarSW(){
    que vuelve al frente (y cada 30 min) se compara la versión publicada con
    la que corre. Si cambió y no hay un formulario abierto, recarga sola; si
    lo hay, avisa y espera a que lo cierres, para no perder lo que escribías. */
-const APP_VERSION='v0.39';
+const APP_VERSION='v0.40';
 let _swReg=null,_buscandoVersion=false,_versionNueva=null;
 async function buscarVersionNueva(){
   if(_buscandoVersion||!navigator.onLine)return;
