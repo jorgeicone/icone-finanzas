@@ -142,6 +142,23 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   border-color:rgba(0,212,255,.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.1)
 }
 .badge.negocio{background:rgba(123,47,255,.18);color:#c9a8ff;border:1px solid rgba(123,47,255,.35)}
+.seg-sm button{padding:6px 11px;font-size:.78rem;gap:5px}
+.seg button.on.propuesto{border-style:dashed;background:rgba(255,140,0,.1);border-color:rgba(255,140,0,.45)}
+.solo-movil{display:none}
+@media (max-width:640px){.seg-sm{flex-direction:column;border-radius:14px}.seg-sm button{justify-content:flex-start}.col-cuenta{display:none}.solo-movil{display:block}.tabla-bolsillos th,.tabla-bolsillos td{padding:10px 5px}.tabla-bolsillos .amount{font-size:.8rem}.seg-sm button{padding:5px 8px;gap:4px;font-size:.74rem}}
+
+/* Disponible real: la cascada de lo que hay a lo que puedes gastar */
+.cascada{display:flex;flex-direction:column}
+.cascada-fila{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:.9rem}
+.cascada-fila .k{color:rgba(255,255,255,.78);min-width:0}
+.cascada-fila .k small{display:block;color:var(--muted);font-size:.74rem;margin-top:2px}
+.cascada-fila.menos .amount{color:rgba(255,255,255,.62)}
+.cascada-fila.total{border-bottom:none;border-top:1px solid rgba(255,255,255,.22);font-weight:700;font-size:1rem;padding-top:11px}
+.cascada-fila.total .k{color:#fff}
+.card.aviso-destinos{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:18px;border:1px solid rgba(255,140,0,.35);background:rgba(255,140,0,.06);font-size:.9rem}
+.kpi-btn{display:block;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
+.kpi-btn:hover{transform:translateY(-2px)}
+.kpi-btn:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
 
 /* Ghost: glass neutro */
 .btn-ghost{--bg:rgba(255,255,255,.07);--bd:rgba(255,255,255,.1)}
@@ -305,7 +322,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.36</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.37</b></div>
       <div style="margin-top:2px">Build 2026-11-08</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -428,6 +445,12 @@ let S={
   /* Plantillas de gasto que se repiten. No crean movimientos solas: generan
      un ESPERADO que luego se concilia contra lo que de verdad ocurrio. */
   recurrentes:[],
+  /* Plata en las cuentas que ya tiene destino y no vive en un bolsillo
+     aparte: {id,nombre,monto,fechaObjetivo,nota}. */
+  compromisos:[],
+  /* Destino de cada bolsillo, por nombre normalizado: libre | ahorro |
+     compromiso. Los montos NO se guardan aqui: salen del ultimo corte. */
+  destinos:{},
   catIngreso:['Salario','Freelance','Inversiones','Ventas','Reembolso','Otros'],
   catEgreso:[...COICOP.map(c=>c.nombre)],
   subcatEgreso:{},   // { "Categoría": ["subcategoría aprendida", ...] }
@@ -497,10 +520,11 @@ function recordarAmbito(tipo,v){
    pase, y cubre de una vez los tres sitios que sobreescriben el estado:
    carga local, sincronización con la nube y restauración de respaldo. */
 function normalizeState(){
-  ['cuentas','saldos','ingresos','egresos','traslados','recurrentes','catIngreso','catEgreso','metodos'].forEach(k=>{
+  ['cuentas','saldos','ingresos','egresos','traslados','recurrentes','compromisos','catIngreso','catEgreso','metodos'].forEach(k=>{
     if(!Array.isArray(S[k]))S[k]=[];
   });
   if(!S.subcatEgreso||typeof S.subcatEgreso!=='object')S.subcatEgreso={};
+  if(!S.destinos||typeof S.destinos!=='object'||Array.isArray(S.destinos))S.destinos={};
   if(!S.config||typeof S.config!=='object')S.config={moneda:'COP',frecuencia:'mensual',nombre:'Mi finanzas'};
 }
 
@@ -665,7 +689,7 @@ async function initSupabase(){
    egresos nuevos y los mismos cortes empataba con el PC y perdía los tres. */
 function contarRegistros(e){
   const n=k=>Array.isArray(e&&e[k])?e[k].length:0;
-  return n('saldos')+n('ingresos')+n('egresos')+n('traslados');
+  return n('saldos')+n('ingresos')+n('egresos')+n('traslados')+n('compromisos');
 }
 
 async function pullFromCloud(forceOverwrite=false){
@@ -1253,6 +1277,7 @@ registerModule({
     /* Si nada se movio desde los cortes, las dos cifras son la misma y no
        tiene sentido mostrar las dos. */
     const hayProy=Math.round(totalProy)!==Math.round(totalSaldo);
+    const disp=calcularDisponible();
     const ingMes=S.ingresos.filter(x=>monthKey(x.fecha)===mk).reduce((a,b)=>a+b.monto,0);
     const egMes=S.egresos.filter(x=>monthKey(x.fecha)===mk).reduce((a,b)=>a+b.monto,0);
     const flujo=ingMes-egMes;
@@ -1265,7 +1290,8 @@ registerModule({
 
     return `
       <div class="kpi-grid">
-        <div class="kpi"><div class="kpi-label">Saldo total</div><div class="kpi-value">${fmtCOP(hayProy?totalProy:totalSaldo)}</div><div class="kpi-meta">${hayProy?`Proyectado · cortes ${fmtCOP(totalSaldo)}`:`${S.cuentas.length} cuenta(s)`}</div></div>
+        ${S.saldos.length?`<button type="button" class="kpi kpi-btn" onclick="go('disponible')" aria-label="Disponible real: ${fmtCOP(disp.disponible)}. Ver el detalle"><div class="kpi-label">Disponible real</div><div class="kpi-value" style="color:${disp.disponible>=0?'inherit':'var(--red)'}">${fmtCOP(disp.disponible)}</div><div class="kpi-meta">de ${fmtCOP(hayProy?totalProy:totalSaldo)} en cuentas${disp.porConfirmar.length?' · <span style="color:var(--orange)">revisa tus bolsillos</span>':''}</div></button>`
+          :`<div class="kpi"><div class="kpi-label">Saldo total</div><div class="kpi-value">${fmtCOP(0)}</div><div class="kpi-meta">${S.cuentas.length} cuenta(s)</div></div>`}
         <div class="kpi green"><div class="kpi-label">Ingresos del mes</div><div class="kpi-value">${fmtCOP(ingMes)}</div><div class="kpi-meta">${pctDelta(ingMes,ingPrev)}</div></div>
         <div class="kpi red"><div class="kpi-label">Egresos del mes</div><div class="kpi-value">${fmtCOP(egMes)}</div><div class="kpi-meta">${pctDelta(egMes,egPrev,true)}</div></div>
         <div class="kpi orange"><div class="kpi-label">Flujo neto</div><div class="kpi-value" style="color:${flujo>=0?'var(--green)':'var(--red)'}">${fmtCOP(flujo)}</div><div class="kpi-meta">${flujo>=0?'Superávit':'Déficit'} del mes</div></div>
@@ -1738,7 +1764,7 @@ registerModule({
               ${p.totalOut?`<div><span class="k">${p.tOut.length} traslado(s) enviado(s)</span><span class="amount neg">−${fmtCOP(p.totalOut)}</span></div>`:''}
             </div>`:''}
             ${bols.length?`<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:10px 12px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px">
-              ${bols.map(b=>`<div style="display:flex;justify-content:space-between;font-size:.82rem;gap:8px"><span style="color:rgba(255,255,255,.7);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.n)}</span><span class="amount" style="color:#fff">${fmtCOP(b.m)}</span></div>`).join('')}
+              ${bols.map(b=>`<div style="display:flex;justify-content:space-between;font-size:.82rem;gap:8px"><span style="color:rgba(255,255,255,.7);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span aria-hidden="true">${iconoDestino(b.n)}</span> ${esc(b.n)}</span><span class="amount" style="color:#fff">${fmtCOP(b.m)}</span></div>`).join('')}
             </div>`:''}
             <button class="btn btn-success btn-sm" style="width:100%;margin-top:auto" onclick="formSaldoFor('${c.id}')">＋ Actualizar saldo</button>
           </div>`;
@@ -2674,6 +2700,326 @@ function aplicarPropuestaFijos(){
   _propFijos=null;
   saveState();closeModal();go('fijos');
   toast(`✓ ${n} gasto(s) fijo(s) declarado(s)`);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DISPONIBLE REAL — compromisos, bolsillos y provisión
+
+   La app mostraba como «saldo» todo lo que hay en las cuentas, como si se
+   pudiera gastar entero. No es así: buena parte ya está apartada en
+   bolsillos de ahorro, otra parte tiene dueño, y de lo que se factura como
+   independiente una fracción es de la seguridad social. La cifra que de
+   verdad sirve para decidir es otra:
+
+     disponible real = líquido − ahorro − con dueño − compromisos − provisión
+
+   Los bolsillos no se copian a otra lista: sus montos siguen saliendo del
+   último corte de cada cuenta, que es la foto verificada del banco. Lo único
+   que se guarda es el DESTINO de cada bolsillo, por nombre. Así, cuando
+   actualizas un corte, la cifra se recalcula sola y nunca se desincroniza.
+
+   Lo que pasó después del corte (el proyectado) se carga a lo libre: los
+   bolsillos de ahorro no se tocan para el gasto del día a día.
+   ═══════════════════════════════════════════════════════════ */
+const DESTINOS=[
+  {id:'libre',     etiqueta:'Libre',     icono:'🟢',ayuda:'para el gasto del día a día'},
+  {id:'ahorro',    etiqueta:'Ahorro',    icono:'🏦',ayuda:'tuyo, pero no para gastar'},
+  {id:'compromiso',etiqueta:'Con dueño', icono:'🤝',ayuda:'ya está destinado a alguien o a algo'}
+];
+/* El nombre es la clave, sin tildes ni mayúsculas: «Ahorro» en Nequi y
+   «ahorro» en un corte viejo son el mismo bolsillo para efectos de destino. */
+const claveBolsillo=n=>String(n||'').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+/* Propuesta inicial, que se muestra como tal hasta que la confirmes: lo que
+   se llama principal o de gasto diario es libre; todo bolsillo con otro
+   nombre se apartó a propósito, y se propone como ahorro. */
+function destinoPropuesto(n){
+  return /principal|diari|gasto|disponible|corriente|billetera/.test(claveBolsillo(n))?'libre':'ahorro';
+}
+function destinoDe(n){return (S.destinos||{})[claveBolsillo(n)]||destinoPropuesto(n)}
+function destinoConfirmado(n){return !!(S.destinos||{})[claveBolsillo(n)]}
+const iconoDestino=n=>(DESTINOS.find(d=>d.id===destinoDe(n))||DESTINOS[0]).icono;
+
+/* Los bolsillos de hoy: los del último corte de cada cuenta. Una cuenta sin
+   bolsillos cuenta como un solo bolsillo «Principal» por el total. */
+function bolsillosActuales(){
+  const out=[];
+  S.cuentas.forEach(c=>{
+    const u=getUltimoSaldo(c.id);if(!u)return;
+    const bs=(u.bolsillos&&u.bolsillos.length)
+      ?u.bolsillos.filter(b=>(+b.m||0)>0)
+      :[{n:'Principal',m:+u.monto||0}];
+    bs.forEach(b=>out.push({cuentaId:c.id,cuenta:nombreCuenta(c.id),color:c.color,n:b.n,m:+b.m||0,fecha:u.fecha}));
+  });
+  return out;
+}
+
+/* ── Provisión de impuestos y seguridad social ──────────────
+   Como independiente que factura por cuenta de cobro, la seguridad social
+   se liquida sobre el 40 % de lo facturado: salud 12,5 % + pensión 16 % +
+   riesgos laborales clase I 0,522 % = 29,022 % × 40 % ≈ 11,6 % de cada
+   ingreso. Ese es el valor por defecto. La renta depende de tu situación
+   y la pone quien te lleve las cuentas: arranca en 0 en vez de inventarla.
+
+   Funciona como un sobre: se acumula sola con cada ingreso posterior a la
+   fecha de corte, y cuando pagas la planilla o el impuesto pulsas «Ya pagué»
+   y el sobre vuelve a cero. El pago en sí lo registras como un egreso
+   normal, que ya baja el saldo; reiniciar el sobre evita contarlo dos veces.
+
+   Base «todos» por defecto: los ingresos de Jorge son honorarios y todos
+   cotizan, estén o no marcados como negocio. */
+function cfgProvision(){
+  const p=(S.config&&S.config.provision)||{};
+  const hoy=new Date();
+  const finMesPasado=fechaLocal(new Date(hoy.getFullYear(),hoy.getMonth(),0));
+  return {
+    pctSS:p.pctSS==null?11.6:+p.pctSS,
+    pctRenta:+p.pctRenta||0,
+    base:p.base==='negocio'?'negocio':'todos',
+    desde:p.desde||finMesPasado
+  };
+}
+function calcularProvision(){
+  const p=cfgProvision();
+  const pct=(p.pctSS+p.pctRenta)/100;
+  const ings=S.ingresos.filter(m=>m.fecha>p.desde&&(p.base==='todos'||ambitoDe(m)==='negocio'));
+  const baseMonto=ings.reduce((a,b)=>a+(+b.monto||0),0);
+  return {...p,pct,ings,baseMonto,total:Math.round(baseMonto*pct)};
+}
+
+function calcularDisponible(){
+  const liquido=getSaldoProyectadoConsolidado();
+  const bols=bolsillosActuales();
+  const suma=t=>bols.filter(b=>destinoDe(b.n)===t).reduce((a,b)=>a+b.m,0);
+  const ahorro=suma('ahorro'),conDueno=suma('compromiso');
+  const compromisos=(S.compromisos||[]).reduce((a,c)=>a+(+c.monto||0),0);
+  const provision=calcularProvision();
+  const disponible=liquido-ahorro-conDueno-compromisos-provision.total;
+  const fijosPend=pendientesDelMes(monthKey()).reduce((a,e)=>a+e.esperado,0);
+  return {liquido,bols,ahorro,conDueno,compromisos,provision,disponible,fijosPend,
+    libreTrasFijos:disponible-fijosPend,
+    porConfirmar:bols.filter(b=>!destinoConfirmado(b.n))};
+}
+
+function elegirDestino(clave,valor){
+  if(!DESTINOS.some(d=>d.id===valor))return;
+  S.destinos=S.destinos||{};
+  S.destinos[clave]=valor;
+  saveState();rerender();
+}
+function confirmarDestinosPropuestos(){
+  S.destinos=S.destinos||{};
+  let n=0;
+  bolsillosActuales().forEach(b=>{
+    const k=claveBolsillo(b.n);
+    if(!S.destinos[k]){S.destinos[k]=destinoPropuesto(b.n);n++}
+  });
+  saveState();rerender();toast(`✓ ${n} bolsillo(s) confirmado(s)`);
+}
+
+registerModule({
+  id:'disponible',label:'Disponible',icon:'🧭',sub:'Lo que de verdad puedes gastar',
+  actions:`<button class="btn btn-outline btn-sm" onclick="formProvision()">⚙ Provisión</button>
+           <button class="btn btn-primary btn-sm" onclick="formCompromiso()">+ Compromiso</button>`,
+  render(){
+    if(!S.cuentas.length||!S.saldos.length)return `<div class="card empty"><div class="empty-icon">🧭</div>
+      <h3 style="margin-bottom:8px">Primero registra un saldo</h3>
+      <p style="color:var(--muted);margin-bottom:16px">El disponible se calcula sobre el último corte de cada cuenta.</p>
+      <button class="btn btn-primary" onclick="go('saldos')">Ir a saldos</button></div>`;
+    const D=calcularDisponible();
+    const P=D.provision;
+    const neg=v=>v?`−${fmtCOP(v)}`:fmtCOP(0);
+    const ultIng=[...S.ingresos].sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+    const diasSinIng=ultIng?Math.floor((new Date(today()+'T00:00')-new Date(ultIng.fecha+'T00:00'))/864e5):null;
+    const pctTxt=(P.pct*100).toLocaleString('es-CO',{maximumFractionDigits:2});
+
+    /* Una fila de la cascada: de lo que hay a lo que puedes gastar. */
+    const paso=(k,v,cls,sub)=>`<div class="cascada-fila ${cls||''}"><span class="k">${k}${sub?`<small>${sub}</small>`:''}</span><span class="amount">${v}</span></div>`;
+
+    const filaBolsillo=b=>{
+      const k=claveBolsillo(b.n),d=destinoDe(b.n),conf=destinoConfirmado(b.n);
+      return `<tr>
+        <td class="col-cuenta"><span class="dot" style="background:${esc(b.color||'#00d4ff')}"></span>${esc(b.cuenta)}</td>
+        <td><div style="font-weight:600">${esc(b.n)}</div><div class="solo-movil" style="color:var(--muted);font-size:.74rem"><span class="dot" style="background:${esc(b.color||'#00d4ff')}"></span>${esc(b.cuenta)}</div>${conf?'':'<div style="font-size:.72rem;color:var(--orange)">propuesto · confírmalo</div>'}</td>
+        <td style="text-align:right" class="amount">${fmtCOP(b.m)}</td>
+        <td><div class="seg seg-sm" data-k="${esc(k)}" role="radiogroup" aria-label="Destino de ${esc(b.n)} en ${esc(b.cuenta)}">
+          ${DESTINOS.map(x=>`<button type="button" role="radio" aria-checked="${x.id===d}" class="${x.id===d?'on':''}${x.id===d&&!conf?' propuesto':''}"
+            title="${x.etiqueta}: ${x.ayuda}" onclick="elegirDestino(this.parentNode.dataset.k,'${x.id}')"><span aria-hidden="true">${x.icono}</span> ${x.etiqueta}</button>`).join('')}
+        </div></td></tr>`;
+    };
+
+    return `
+      <div class="kpi-grid">
+        <div class="kpi ${D.disponible>=0?'green':'red'}"><div class="kpi-label">Disponible real</div>
+          <div class="kpi-value" style="color:${D.disponible>=0?'inherit':'var(--red)'}">${fmtCOP(D.disponible)}</div>
+          <div class="kpi-meta">de ${fmtCOP(D.liquido)} en tus cuentas</div></div>
+        <div class="kpi"><div class="kpi-label">🏦 Ahorro</div><div class="kpi-value">${fmtCOP(D.ahorro)}</div><div class="kpi-meta">Tuyo, pero no para gastar</div></div>
+        <div class="kpi orange"><div class="kpi-label">🤝 Con dueño</div><div class="kpi-value">${fmtCOP(D.conDueno+D.compromisos)}</div><div class="kpi-meta">Bolsillos y compromisos</div></div>
+        <div class="kpi"><div class="kpi-label">🧾 Provisión</div><div class="kpi-value">${fmtCOP(P.total)}</div><div class="kpi-meta">Seguridad social${P.pctRenta?' y renta':''}</div></div>
+      </div>
+
+      ${D.porConfirmar.length?`<div class="card aviso-destinos">
+        <div><b>${D.porConfirmar.length} bolsillo(s) con destino propuesto.</b>
+        La cifra ya los cuenta así, pero el destino lo decides tú: revísalos abajo.</div>
+        <button class="btn btn-outline btn-sm" onclick="confirmarDestinosPropuestos()">Confirmar como están</button></div>`:''}
+
+      <div class="grid-2">
+        <div class="card"><h3>🧮 De lo que hay a lo que puedes gastar</h3>
+          <div class="cascada">
+            ${paso('Lo que hay en tus cuentas',fmtCOP(D.liquido),'','proyectado desde los cortes')}
+            ${paso('🏦 Bolsillos de ahorro',neg(D.ahorro),'menos')}
+            ${paso('🤝 Bolsillos con dueño',neg(D.conDueno),'menos')}
+            ${paso('📌 Compromisos sin bolsillo',neg(D.compromisos),'menos')}
+            ${paso('🧾 Provisión',neg(P.total),'menos',`${pctTxt} % de ${fmtCOP(P.baseMonto)} facturado`)}
+            ${paso('Disponible real',fmtCOP(D.disponible),'total')}
+            ${D.fijosPend?paso('🔁 Fijos que faltan este mes',neg(D.fijosPend),'menos'):''}
+            ${D.fijosPend?paso('Libre para el gasto variable',fmtCOP(D.libreTrasFijos),'total'):''}
+          </div>
+          <p style="color:var(--muted);font-size:.8rem;margin-top:12px;line-height:1.5">
+            Lo que registraste después de cada corte se descuenta de lo libre: se asume que el gasto
+            del día a día no sale de los bolsillos de ahorro.</p>
+        </div>
+
+        <div class="card"><h3>🧾 Provisión de seguridad social</h3>
+          <div class="proy-box">
+            <div><span class="k">Ingresos posteriores al ${fmtDate(P.desde)}${P.base==='negocio'?' · solo negocio':''}</span><span class="amount">${fmtCOP(P.baseMonto)}</span></div>
+            <div><span class="k">Seguridad social</span><span class="amount">${P.pctSS.toLocaleString('es-CO')} %</span></div>
+            <div><span class="k">Renta</span><span class="amount">${P.pctRenta.toLocaleString('es-CO')} %</span></div>
+            <div><span class="k"><b>Apartado en el sobre</b></span><span class="amount"><b>${fmtCOP(P.total)}</b></span></div>
+          </div>
+          ${diasSinIng!=null&&diasSinIng>35?`<p style="font-size:.84rem;color:var(--orange);margin-bottom:10px;line-height:1.5">
+            Tu último ingreso registrado es del ${fmtDate(ultIng.fecha)}, hace ${diasSinIng} días.
+            Si has facturado desde entonces, el sobre está en cero porque no lo sabe.</p>`:''}
+          <p style="color:var(--muted);font-size:.8rem;line-height:1.5;margin-bottom:12px">
+            Como independiente, la planilla se liquida sobre el 40 % de lo facturado: salud 12,5 % +
+            pensión 16 % + riesgos 0,522 % ≈ 11,6 % de cada ingreso. La renta la fija quien te lleve
+            las cuentas. Cuando pagues, registra el egreso y pulsa «Ya pagué».</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-success btn-sm" onclick="provisionPagada()" ${P.total?'':'disabled'}>✓ Ya pagué</button>
+            <button class="btn btn-ghost btn-sm" onclick="formProvision()">⚙ Ajustar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px"><h3>👛 Tus bolsillos · ¿para qué es cada uno?</h3>
+        <p style="color:var(--muted);font-size:.82rem;margin:-4px 0 14px;line-height:1.5">
+          Salen del último corte de cada cuenta. El destino se guarda por nombre: si dos cuentas tienen un
+          bolsillo «Ahorro», lo decides una vez para los dos.</p>
+        <div class="table-wrap"><table class="tabla-bolsillos">
+          <thead><tr><th class="col-cuenta">Cuenta</th><th>Bolsillo</th><th style="text-align:right">Monto</th><th>Destino</th></tr></thead>
+          <tbody>${D.bols.map(filaBolsillo).join('')}</tbody></table></div>
+      </div>
+
+      <div class="card" style="margin-top:18px"><h3>📌 Compromisos sin bolsillo</h3>
+        <p style="color:var(--muted);font-size:.82rem;margin:-4px 0 14px;line-height:1.5">
+          Plata que está en lo libre pero ya tiene destino: algo que debes entregar, un pago que ya
+          prometiste. Si la tienes en un bolsillo aparte, márcalo «Con dueño» arriba en vez de anotarla aquí.</p>
+        ${(S.compromisos||[]).length?`<div class="table-wrap"><table>
+          <thead><tr><th>Para qué</th><th>Cuándo</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
+          ${[...S.compromisos].sort((a,b)=>(a.fechaObjetivo||'9').localeCompare(b.fechaObjetivo||'9')).map(c=>`<tr>
+            <td><div style="font-weight:600">${esc(c.nombre)}</div>${c.nota?`<div style="color:var(--muted);font-size:.74rem">${esc(c.nota)}</div>`:''}</td>
+            <td style="color:var(--muted);font-size:.84rem">${c.fechaObjetivo?fmtDate(c.fechaObjetivo):'—'}</td>
+            <td style="text-align:right" class="amount">${fmtCOP(c.monto)}</td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-success btn-sm" onclick="cumplirCompromiso('${c.id}')">Cumplido</button>
+              <button class="btn btn-ghost btn-sm" onclick="formCompromiso('${c.id}')" aria-label="Editar ${esc(c.nombre)}">✎</button>
+              <button class="btn btn-ghost btn-sm" onclick="delCompromiso('${c.id}')" aria-label="Eliminar ${esc(c.nombre)}">🗑</button></td>
+          </tr>`).join('')}</tbody></table></div>`
+          :`<div class="empty" style="padding:18px">Ninguno por ahora.</div>`}
+      </div>
+    `;
+  }
+});
+
+function formCompromiso(id){
+  const c=id?(S.compromisos||[]).find(x=>x.id===id):null;
+  const d=c||{nombre:'',monto:'',fechaObjetivo:'',nota:''};
+  openModal(`<h2>${id?'Editar':'Nuevo'} compromiso</h2>
+    <p style="color:var(--muted);font-size:.86rem;margin-bottom:14px">
+      Plata que está en tus cuentas pero ya tiene destino. Se resta del disponible hasta que lo marques cumplido.</p>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
+      <div class="field" style="grid-column:1/-1"><label for="k-nombre">¿Para qué es?</label>
+        <input class="icone-input" id="k-nombre" value="${esc(d.nombre)}" placeholder="Regalo de grado, abono a una deuda…"></div>
+      <div class="field"><label for="k-monto">Monto (COP)</label>
+        <input type="number" step="any" class="icone-input" id="k-monto" value="${esc(d.monto)}" placeholder="0"></div>
+      <div class="field"><label for="k-fecha">¿Para cuándo? (opcional)</label>
+        <input type="date" class="icone-input" id="k-fecha" value="${esc(d.fechaObjetivo||'')}"></div>
+      <div class="field" style="grid-column:1/-1"><label for="k-nota">Nota (opcional)</label>
+        <input class="icone-input" id="k-nota" value="${esc(d.nota||'')}"></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveCompromiso('${id||''}')">Guardar</button>
+    </div>`);
+}
+function saveCompromiso(id){
+  const nombre=document.getElementById('k-nombre').value.trim();
+  if(!nombre)return toast('Dile para qué es','error');
+  const monto=parseFloat(document.getElementById('k-monto').value);
+  if(isNaN(monto)||monto<=0)return toast('Monto inválido','error');
+  const datos={nombre,monto,fechaObjetivo:document.getElementById('k-fecha').value||'',
+    nota:document.getElementById('k-nota').value.trim()};
+  S.compromisos=S.compromisos||[];
+  if(id){const c=S.compromisos.find(x=>x.id===id);if(c)Object.assign(c,datos)}
+  else S.compromisos.push({id:uid(),...datos,createdAt:new Date().toISOString()});
+  saveState();closeModal();rerender();toast('Compromiso guardado');
+}
+/* Cumplir no es lo mismo que borrar: el compromiso sale del cálculo, y si
+   la plata salió de una cuenta lo correcto es registrar ese egreso, que es
+   lo que de verdad baja el saldo. */
+function cumplirCompromiso(id){
+  const c=(S.compromisos||[]).find(x=>x.id===id);if(!c)return;
+  if(!confirm(`¿Marcar «${c.nombre}» como cumplido?\n\nDeja de restarse del disponible. Si la plata salió de una cuenta, registra también el egreso para que el saldo lo refleje.`))return;
+  S.compromisos=S.compromisos.filter(x=>x.id!==id);
+  saveState();rerender();toast('Compromiso cumplido');
+}
+function delCompromiso(id){
+  const c=(S.compromisos||[]).find(x=>x.id===id);if(!c)return;
+  if(!confirm(`¿Eliminar el compromiso «${c.nombre}»?`))return;
+  S.compromisos=S.compromisos.filter(x=>x.id!==id);
+  saveState();rerender();toast('Compromiso eliminado');
+}
+
+function formProvision(){
+  const p=cfgProvision();
+  openModal(`<h2>Provisión de seguridad social e impuestos</h2>
+    <p style="color:var(--muted);font-size:.86rem;margin-bottom:14px;line-height:1.5">
+      Una parte de lo que facturas no es tuya. Este sobre la aparta sola con cada ingreso, para que no
+      la veas como disponible.</p>
+    <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
+      <div class="field"><label for="p-ss">Seguridad social (% del ingreso)</label>
+        <input type="number" step="0.01" min="0" max="100" class="icone-input" id="p-ss" value="${p.pctSS}"></div>
+      <div class="field"><label for="p-renta">Renta (% del ingreso)</label>
+        <input type="number" step="0.01" min="0" max="100" class="icone-input" id="p-renta" value="${p.pctRenta}"></div>
+      <div class="field"><label for="p-desde">Contar ingresos posteriores al</label>
+        <input type="date" class="icone-input" id="p-desde" value="${esc(p.desde)}"></div>
+      <div class="field"><label for="p-base">¿Sobre qué ingresos?</label>
+        <select class="icone-select" id="p-base">
+          <option value="todos" ${p.base==='todos'?'selected':''}>Todos</option>
+          <option value="negocio" ${p.base==='negocio'?'selected':''}>Solo los de negocio</option>
+        </select></div>
+    </div>
+    <p style="color:var(--muted);font-size:.8rem;margin-top:12px;line-height:1.5">
+      11,6 % es la planilla de un independiente por prestación de servicios: el 40 % de lo facturado,
+      por salud (12,5 %), pensión (16 %) y riesgos clase I (0,522 %). «Todos» porque tus ingresos son
+      honorarios y todos cotizan; elige «Solo los de negocio» si parte de lo que recibes ya llega con la
+      seguridad social descontada.</p>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveProvision()">Guardar</button>
+    </div>`);
+}
+function saveProvision(){
+  const num=id=>{const v=parseFloat(document.getElementById(id).value);return isNaN(v)?0:Math.min(100,Math.max(0,v))};
+  S.config.provision={pctSS:num('p-ss'),pctRenta:num('p-renta'),
+    desde:document.getElementById('p-desde').value||cfgProvision().desde,
+    base:document.getElementById('p-base').value==='negocio'?'negocio':'todos'};
+  saveState();closeModal();rerender();toast('Provisión guardada');
+}
+function provisionPagada(){
+  const P=calcularProvision();
+  if(!confirm(`¿Ya pagaste la planilla o el impuesto?\n\nEl sobre de ${fmtCOP(P.total)} vuelve a cero y empieza a contar los ingresos posteriores a hoy. Registra el pago como un egreso para que el saldo lo refleje.`))return;
+  S.config.provision={...cfgProvision(),desde:today()};
+  saveState();rerender();toast('Sobre de provisión reiniciado');
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -4022,7 +4368,9 @@ function alternarFondos(v){
 }
 function pintarFondoSeccion(){
   const activo=S.config?.fondos!==false;
-  const cual=FONDOS.includes(currentView)?currentView:'dashboard';
+  /* Disponible es la otra cara de Saldos: comparte su fondo. */
+  const vista=currentView==='disponible'?'saldos':currentView;
+  const cual=FONDOS.includes(vista)?vista:'dashboard';
   document.body.style.setProperty('--fondo-seccion',
     activo?`url("img/fondo-${cual}.webp")`:'none');
 }
