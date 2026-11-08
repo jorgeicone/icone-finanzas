@@ -159,6 +159,27 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .kpi-btn:hover{transform:translateY(-2px)}
 .kpi-btn:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
 
+/* Salud financiera: semáforos */
+.semaforos{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px}
+.semaforo{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08);border-top:3px solid var(--sem);border-radius:20px;padding:20px 22px;backdrop-filter:blur(20px)}
+.semaforo-top{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.semaforo-luz{width:11px;height:11px;border-radius:50%;background:var(--sem);box-shadow:0 0 10px var(--sem);flex:none}
+.semaforo-estado{margin-left:auto;font-size:.72rem;font-weight:700;color:var(--sem);text-transform:uppercase;letter-spacing:.06em}
+.semaforo-det{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:.78rem;color:var(--muted);line-height:1.5}
+.franja-salud{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer;margin-bottom:18px;padding:14px 18px}
+.franja-salud:hover{border-color:rgba(0,212,255,.3)}
+.franja-salud:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+.sem-chip{display:inline-flex;align-items:center;gap:7px;font-size:.84rem;color:rgba(255,255,255,.75)}
+.sem-chip b{color:#fff;font-variant-numeric:tabular-nums}
+.barra{height:7px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+.barra span{display:block;height:100%;border-radius:99px}
+.topes-grid{display:grid;grid-template-columns:1fr 130px 100px;gap:8px 10px;align-items:center;max-height:52vh;overflow:auto;padding-right:4px}
+.topes-grid label{font-size:.86rem;min-width:0}
+.col-avance{min-width:120px}
+@media (max-width:640px){.tabla-salud th,.tabla-salud td{padding:9px 5px;font-size:.78rem}.tabla-salud .col-opc{display:none}.col-avance{min-width:56px}.tabla-salud .badge{font-size:.68rem;padding:3px 7px}}
+.topes-hist{font-size:.76rem;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+@media (max-width:640px){.topes-grid{grid-template-columns:1fr 110px}.topes-hist{display:none}}
+
 /* Ghost: glass neutro */
 .btn-ghost{--bg:rgba(255,255,255,.07);--bd:rgba(255,255,255,.1)}
 .btn-ghost:hover{--bg:rgba(255,255,255,.14);--bd:rgba(255,255,255,.18)}
@@ -321,7 +342,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.40</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.41</b></div>
       <div style="margin-top:2px">Build 2026-11-08</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -450,6 +471,8 @@ let S={
   /* Destino de cada bolsillo, por nombre normalizado: libre | ahorro |
      compromiso. Los montos NO se guardan aqui: salen del ultimo corte. */
   destinos:{},
+  /* Topes de gasto variable por division COICOP: { 'Mercado y bebidas': 450000 } */
+  presupuesto:{},
   catIngreso:['Salario','Freelance','Inversiones','Ventas','Reembolso','Otros'],
   catEgreso:[...COICOP.map(c=>c.nombre)],
   subcatEgreso:{},   // { "Categoría": ["subcategoría aprendida", ...] }
@@ -524,6 +547,7 @@ function normalizeState(){
   });
   if(!S.subcatEgreso||typeof S.subcatEgreso!=='object')S.subcatEgreso={};
   if(!S.destinos||typeof S.destinos!=='object'||Array.isArray(S.destinos))S.destinos={};
+  if(!S.presupuesto||typeof S.presupuesto!=='object'||Array.isArray(S.presupuesto))S.presupuesto={};
   if(!S.config||typeof S.config!=='object')S.config={moneda:'COP',frecuencia:'mensual',nombre:'Mi finanzas'};
 }
 
@@ -1318,6 +1342,7 @@ registerModule({
         <div class="kpi red"><div class="kpi-label">Egresos del mes</div><div class="kpi-value">${fmtCOP(egMes)}</div><div class="kpi-meta">${pctDelta(egMes,egPrev,true)}</div></div>
         <div class="kpi orange"><div class="kpi-label">Flujo neto</div><div class="kpi-value" style="color:${flujo>=0?'var(--green)':'var(--red)'}">${fmtCOP(flujo)}</div><div class="kpi-meta">${flujo>=0?'Superávit':'Déficit'} del mes</div></div>
       </div>
+      ${franjaSalud()}
       ${avisoFijosPendientes(mk)}
       ${repartoAmbito(mk)}
 
@@ -3032,6 +3057,297 @@ function provisionPagada(){
 }
 
 /* ═══════════════════════════════════════════════════════════
+   SALUD FINANCIERA — cuatro semáforos en vez de más gráficas
+
+   1. Meses de autonomía   cuánto aguantas si dejas de facturar hoy.
+   2. Tasa de ahorro       qué parte de lo que entra no sale.
+   3. Peso de los fijos    qué parte del ingreso está comprometida antes
+                           de decidir nada.
+   4. Presupuesto del mes  si el gasto variable va al ritmo de sus topes.
+
+   El problema de fondo son los datos, no las fórmulas: un mes donde no
+   registraste el arriendo parece un mes barato, y promediarlo te haría
+   creer que gastas la mitad. Por eso un mes solo cuenta como COMPLETO
+   cuando todos tus fijos de ese mes aparecen pagados. Los incompletos se
+   muestran, pero no entran en ningún promedio. Y donde falta un dato, el
+   semáforo se pone gris: un rojo por falta de datos es tan engañoso como
+   un verde.
+   ═══════════════════════════════════════════════════════════ */
+const SEMAFOROS={
+  verde:   {color:'var(--green)', etiqueta:'Sano'},
+  amarillo:{color:'var(--yellow)',etiqueta:'Atento'},
+  rojo:    {color:'var(--red)',   etiqueta:'En riesgo'},
+  gris:    {color:'var(--muted)', etiqueta:'Sin datos'}
+};
+const mediana=a=>{
+  if(!a.length)return 0;
+  const s=[...a].sort((x,y)=>x-y),m=Math.floor(s.length/2);
+  return s.length%2?s[m]:(s[m-1]+s[m])/2;
+};
+const pctFmt=v=>(v*100).toLocaleString('es-CO',{maximumFractionDigits:1})+' %';
+const egresoEsFijo=m=>(S.recurrentes||[]).some(r=>satisface(m,r));
+
+/* Los últimos meses cerrados, del más viejo al más reciente. */
+function resumenMeses(n=12){
+  const actual=monthKey(),out=[];
+  for(let i=n;i>=1;i--){
+    const mes=sumarMeses(actual,-i);
+    const eg=S.egresos.filter(m=>monthKey(m.fecha)===mes);
+    const total=eg.reduce((a,b)=>a+(+b.monto||0),0);
+    const fijos=eg.filter(egresoEsFijo).reduce((a,b)=>a+(+b.monto||0),0);
+    const ing=S.ingresos.filter(m=>monthKey(m.fecha)===mes).reduce((a,b)=>a+(+b.monto||0),0);
+    const faltan=estadoDelMes(mes).filter(e=>!e.pagado).map(e=>e.r.concepto);
+    /* Completo: hay registros, ningún fijo quedó sin pagar, y hay algo de
+       gasto variable (un mes con solo fijos es un mes que no se anotó). */
+    const completo=eg.length>0&&!faltan.length&&total>fijos;
+    out.push({mes,total,fijos,variable:total-fijos,ing,completo,faltan,n:eg.length});
+  }
+  return out;
+}
+
+/* Lo que cuesta un mes de tu vida: los fijos declarados más la mediana del
+   gasto variable de los últimos meses completos. La mediana y no el
+   promedio, para que un mes con un gasto extraordinario no lo infle. */
+function fijosMensuales(){
+  return (S.recurrentes||[]).filter(r=>r.activo!==false)
+    .reduce((a,r)=>a+(+r.monto||0)/mesesDelPeriodo(r.periodicidad),0);
+}
+function gastoReferencia(){
+  const meses=resumenMeses(12);
+  const comp=meses.filter(m=>m.completo).slice(-6);
+  const medVar=mediana(comp.map(m=>m.variable));
+  const fijos=fijosMensuales();
+  const calculado=Math.round(fijos+medVar);
+  const manual=+(S.config&&S.config.gastoReferencia)||0;
+  return {meses,comp,medVar,fijos,calculado,valor:manual||calculado,manual:!!manual};
+}
+
+function variablePorDivision(mes){
+  const o={};
+  S.egresos.filter(m=>monthKey(m.fecha)===mes&&!egresoEsFijo(m))
+    .forEach(m=>{const k=m.categoria||'Sin categoría';o[k]=(o[k]||0)+(+m.monto||0)});
+  return o;
+}
+/* Topes sembrados del histórico: la mediana de lo que gastaste en cada
+   división en tus meses completos, redondeada hacia arriba a $10.000. Solo
+   gasto variable: los fijos no se presupuestan, ya están declarados. */
+function proponerTopes(){
+  const comp=gastoReferencia().comp;
+  const out={};
+  if(!comp.length)return out;
+  const porMes=comp.map(m=>variablePorDivision(m.mes));
+  S.catEgreso.forEach(cat=>{
+    const v=mediana(porMes.map(o=>o[cat]||0));
+    if(v>0)out[cat]=Math.ceil(v/10000)*10000;
+  });
+  return out;
+}
+
+function calcularSalud(){
+  const ref=gastoReferencia();
+  const D=calcularDisponible();
+  const mesActual=monthKey();
+  const conIngreso=ref.meses.filter(m=>m.ing>0);
+
+  /* 1 · Autonomía: lo tuyo (disponible + apartado) entre lo que cuesta un
+     mes. Lo que tiene dueño y la provisión ya quedaron fuera del disponible. */
+  const colchon=D.disponible+D.ahorro;
+  const autonomia=ref.valor>0?colchon/ref.valor:null;
+  const aut={valor:autonomia,colchon,soloDisponible:ref.valor>0?D.disponible/ref.valor:null,
+    estado:autonomia==null?'gris':autonomia>=6?'verde':autonomia>=3?'amarillo':'rojo'};
+
+  /* 2 · Tasa de ahorro sobre los últimos tres meses completos con ingresos.
+     Si el último ingreso registrado tiene más de dos meses, el dato ya no
+     describe tu presente: gris, mostrando el último valor conocido. */
+  const baseAh=ref.meses.filter(m=>m.completo&&m.ing>0).slice(-3);
+  const ingAh=baseAh.reduce((a,m)=>a+m.ing,0),egAh=baseAh.reduce((a,m)=>a+m.total,0);
+  const tasa=ingAh?(ingAh-egAh)/ingAh:null;
+  const ultIng=[...S.ingresos].sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+  const viejo=!ultIng||mesesEntre(monthKey(ultIng.fecha),mesActual)>2;
+  const ah={valor:tasa,meses:baseAh.map(m=>m.mes),viejo,ultIng,
+    estado:tasa==null||viejo?'gris':tasa>=0.2?'verde':tasa>=0.1?'amarillo':'rojo'};
+
+  /* 3 · Peso de los fijos sobre el ingreso promedio de los meses que lo
+     tienen registrado. Regla 50/30/20: lo necesario, hasta la mitad. */
+  const ingProm=conIngreso.length?conIngreso.reduce((a,m)=>a+m.ing,0)/conIngreso.length:0;
+  const peso=ingProm&&ref.fijos?ref.fijos/ingProm:null;
+  const pf={valor:peso,fijos:ref.fijos,ingProm,nMeses:conIngreso.length,
+    estado:peso==null?'gris':peso<=0.5?'verde':peso<=0.65?'amarillo':'rojo'};
+
+  /* 4 · Presupuesto: el gasto variable del mes contra sus topes, al ritmo
+     del calendario. A mitad de mes deberías llevar la mitad del tope. */
+  const topes=S.presupuesto||{};
+  const totalTopes=Object.values(topes).reduce((a,b)=>a+(+b||0),0);
+  const gastado=variablePorDivision(mesActual);
+  const totalGastado=Object.values(gastado).reduce((a,b)=>a+b,0);
+  const hoy=new Date(),diasMes=new Date(hoy.getFullYear(),hoy.getMonth()+1,0).getDate();
+  const ritmo=totalTopes*hoy.getDate()/diasMes;
+  const pr={totalTopes,totalGastado,ritmo,gastado,topes,diasMes,
+    estado:!totalTopes?'gris':totalGastado<=ritmo?'verde':totalGastado<=totalTopes?'amarillo':'rojo'};
+
+  return {ref,D,aut,ah,pf,pr};
+}
+
+/* Tarjeta de un semáforo. */
+function tarjetaSemaforo(titulo,valor,estado,meta,detalle){
+  const s=SEMAFOROS[estado]||SEMAFOROS.gris;
+  return `<div class="semaforo" style="--sem:${s.color}">
+    <div class="semaforo-top"><span class="semaforo-luz" aria-hidden="true"></span>
+      <span class="kpi-label" style="margin:0">${titulo}</span>
+      <span class="semaforo-estado">${s.etiqueta}</span></div>
+    <div class="kpi-value" style="color:${estado==='gris'?'var(--muted)':'inherit'}">${valor}</div>
+    <div class="kpi-meta">${meta}</div>
+    ${detalle?`<div class="semaforo-det">${detalle}</div>`:''}
+  </div>`;
+}
+const mesesFmt=v=>v==null?'—':v.toLocaleString('es-CO',{maximumFractionDigits:1})+(Math.abs(v-1)<0.05?' mes':' meses');
+
+/* Franja compacta para el Dashboard: los cuatro semáforos en una línea. */
+function franjaSalud(){
+  if(!S.saldos.length)return '';
+  const H=calcularSalud();
+  const chip=(t,v,e)=>{const s=SEMAFOROS[e];return `<span class="sem-chip" style="--sem:${s.color}"><span class="semaforo-luz" aria-hidden="true"></span>${t} <b>${v}</b></span>`};
+  return `<button type="button" class="card franja-salud" onclick="go('salud')" aria-label="Ver la salud financiera">
+    <span style="font-weight:700">🩺 Salud</span>
+    ${chip('Autonomía',mesesFmt(H.aut.valor),H.aut.estado)}
+    ${chip('Ahorro',H.ah.valor==null||H.ah.estado==='gris'?'—':pctFmt(H.ah.valor),H.ah.estado)}
+    ${chip('Fijos',H.pf.valor==null?'—':pctFmt(H.pf.valor),H.pf.estado)}
+    ${chip('Presupuesto',H.pr.totalTopes?pctFmt(H.pr.totalGastado/H.pr.totalTopes):'—',H.pr.estado)}
+  </button>`;
+}
+
+registerModule({
+  id:'salud',label:'Salud',icon:'🩺',sub:'Cuatro señales de cómo van tus finanzas',
+  actions:`<button class="btn btn-outline btn-sm" onclick="formGastoReferencia()">⚙ Gasto mensual</button>
+           <button class="btn btn-primary btn-sm" onclick="formTopes()">🎯 Topes del mes</button>`,
+  render(){
+    if(!S.saldos.length)return `<div class="card empty"><div class="empty-icon">🩺</div>
+      <h3 style="margin-bottom:8px">Primero registra un saldo</h3>
+      <p style="color:var(--muted);margin-bottom:16px">La salud se mide sobre tu disponible y tu historial.</p>
+      <button class="btn btn-primary" onclick="go('saldos')">Ir a saldos</button></div>`;
+    const H=calcularSalud(),R=H.ref,mes=monthKey();
+    const ultIngTxt=H.ah.ultIng?fmtDate(H.ah.ultIng.fecha):'nunca';
+
+    const t1=tarjetaSemaforo('Meses de autonomía',mesesFmt(H.aut.valor),H.aut.estado,
+      R.valor?`${fmtCOP(H.aut.colchon)} entre ${fmtCOP(R.valor)} al mes`:'Falta saber cuánto gastas al mes',
+      `Solo con el disponible: <b>${mesesFmt(H.aut.soloDisponible)}</b>. Meta para quien factura por cuenta de cobro: 6 meses o más.`);
+    const t2=tarjetaSemaforo('Tasa de ahorro',H.ah.valor==null?'—':pctFmt(H.ah.valor),H.ah.estado,
+      H.ah.viejo?`Último ingreso registrado: ${ultIngTxt}`:H.ah.meses.length?`Con ${H.ah.meses.map(fmtMonth).join(', ')}`:'Sin meses completos con ingresos',
+      H.ah.viejo?'Anota tus ingresos recientes: sin ellos no se puede saber si ahorras.':'Sano desde el 20 %. Por debajo del 10 % no hay margen para imprevistos.');
+    const t3=tarjetaSemaforo('Peso de los fijos',H.pf.valor==null?'—':pctFmt(H.pf.valor),H.pf.estado,
+      H.pf.valor==null?(R.fijos?'Faltan ingresos registrados':'Declara tus fijos en la sección Fijos'):`${fmtCOP(H.pf.fijos)} de ${fmtCOP(H.pf.ingProm)} de ingreso promedio`,
+      `Sano hasta el 50 % de lo que entra.${H.pf.nMeses&&H.pf.nMeses<3?` Calculado con solo ${H.pf.nMeses} mes(es) de ingresos.`:''}`);
+    const t4=tarjetaSemaforo('Presupuesto del mes',H.pr.totalTopes?pctFmt(H.pr.totalGastado/H.pr.totalTopes):'—',H.pr.estado,
+      H.pr.totalTopes?`${fmtCOP(H.pr.totalGastado)} de ${fmtCOP(H.pr.totalTopes)} · al día de hoy tocaba ${fmtCOP(H.pr.ritmo)}`:'Todavía no tienes topes',
+      'Solo gasto variable: los fijos no cuentan, ya están declarados.');
+
+    /* Topes por división, de mayor a menor gasto. */
+    const divs=[...new Set([...Object.keys(H.pr.topes),...Object.keys(H.pr.gastado)])]
+      .map(c=>({c,tope:+H.pr.topes[c]||0,g:H.pr.gastado[c]||0}))
+      .sort((a,b)=>(b.tope||b.g)-(a.tope||a.g));
+    const filaTope=x=>{
+      const p=x.tope?x.g/x.tope:null;
+      const color=!x.tope?'var(--muted)':p>1?'var(--red)':p>H.pr.ritmo/(H.pr.totalTopes||1)?'var(--yellow)':'var(--green)';
+      return `<tr><td><span class="dot" style="background:${colorDeCategoria(x.c)}"></span>${esc(x.c)}</td>
+        <td style="text-align:right" class="amount">${x.tope?fmtCOP(x.tope):'<span style="color:var(--muted)">sin tope</span>'}</td>
+        <td style="text-align:right" class="amount">${fmtCOP(x.g)}</td>
+        <td class="col-avance"><div class="barra"><span style="width:${Math.min(100,(p||0)*100)}%;background:${color}"></span></div>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:3px">${x.tope?(x.g<=x.tope?`quedan ${fmtCOP(x.tope-x.g)}`:`<span style="color:var(--red)">pasado por ${fmtCOP(x.g-x.tope)}</span>`):''}</div></td></tr>`;
+    };
+
+    return `
+      <div class="semaforos">${t1}${t2}${t3}${t4}</div>
+
+      <div class="card" style="margin-top:18px"><h3>🎯 Gasto variable de ${fmtMonthLargo(mes)}</h3>
+        ${H.pr.totalTopes?'':`<div class="card aviso-destinos" style="margin:4px 0 14px">
+          <div>Todavía no tienes topes. Puedo proponértelos desde lo que gastaste en tus meses completos.</div>
+          <button class="btn btn-outline btn-sm" onclick="formTopes(true)">Proponer topes</button></div>`}
+        ${divs.length?`<div class="table-wrap"><table class="tabla-salud">
+          <thead><tr><th>División</th><th style="text-align:right">Tope</th><th style="text-align:right">Gastado</th><th>Avance</th></tr></thead>
+          <tbody>${divs.map(filaTope).join('')}</tbody></table></div>`
+          :`<div class="empty" style="padding:18px">Aún no hay gasto variable este mes.</div>`}
+      </div>
+
+      <div class="card" style="margin-top:18px"><h3>📅 Cuánto cuesta un mes</h3>
+        <div class="proy-box" style="margin-bottom:12px">
+          <div><span class="k">Fijos declarados (al mes)</span><span class="amount">${fmtCOP(R.fijos)}</span></div>
+          <div><span class="k">Gasto variable típico · mediana de ${R.comp.length} mes(es) completo(s)</span><span class="amount">${fmtCOP(R.medVar)}</span></div>
+          <div><span class="k"><b>${R.manual?'Gasto de referencia (lo pusiste tú)':'Gasto de referencia'}</b></span><span class="amount"><b>${fmtCOP(R.valor)}</b></span></div>
+        </div>
+        <p style="color:var(--muted);font-size:.8rem;line-height:1.5;margin-bottom:12px">
+          Un mes cuenta como completo cuando todos sus fijos aparecen pagados. Los incompletos se
+          muestran pero no entran en el cálculo: un mes sin el arriendo anotado parece barato y
+          te haría creer que gastas menos de lo que gastas.</p>
+        <div class="table-wrap"><table class="tabla-salud">
+          <thead><tr><th>Mes</th><th style="text-align:right">Ingresos</th><th style="text-align:right">Egresos</th><th class="col-opc" style="text-align:right">Variable</th><th>Estado</th></tr></thead>
+          <tbody>${R.meses.filter(m=>m.n||m.ing).reverse().map(m=>`<tr>
+            <td><span class="col-opc">${fmtMonthLargo(m.mes)}</span><span class="solo-movil">${fmtMonth(m.mes)}</span></td>
+            <td style="text-align:right" class="amount">${m.ing?fmtCOP(m.ing):'<span style="color:var(--muted)">—</span>'}</td>
+            <td style="text-align:right" class="amount">${fmtCOP(m.total)}</td>
+            <td style="text-align:right" class="amount col-opc">${fmtCOP(m.variable)}</td>
+            <td>${m.completo?'<span class="badge green">Completo</span>'
+              :`<span class="badge orange">Incompleto</span>${m.faltan.length?`<div style="font-size:.72rem;color:var(--muted);margin-top:3px">sin ${esc(m.faltan.slice(0,3).join(', '))}${m.faltan.length>3?'…':''}</div>`:''}`}</td>
+          </tr>`).join('')}</tbody></table></div>
+      </div>
+    `;
+  }
+});
+
+function formGastoReferencia(){
+  const R=gastoReferencia();
+  openModal(`<h2>¿Cuánto cuesta un mes?</h2>
+    <p style="color:var(--muted);font-size:.86rem;margin-bottom:14px;line-height:1.5">
+      Calculado: ${fmtCOP(R.calculado)} (fijos ${fmtCOP(R.fijos)} + variable típico ${fmtCOP(R.medVar)}).
+      Si sabes que es otro valor, escríbelo. Déjalo vacío para usar el calculado.</p>
+    <div class="field"><label for="gr-valor">Gasto mensual de referencia (COP)</label>
+      <input type="number" step="any" min="0" class="icone-input" id="gr-valor" value="${R.manual?R.valor:''}" placeholder="${R.calculado}"></div>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveGastoReferencia()">Guardar</button>
+    </div>`);
+}
+function saveGastoReferencia(){
+  const v=parseFloat(document.getElementById('gr-valor').value);
+  if(!isNaN(v)&&v>0)S.config.gastoReferencia=Math.round(v);
+  else delete S.config.gastoReferencia;
+  saveState();closeModal();rerender();toast('Gasto de referencia guardado');
+}
+
+/* Editor de topes. Con proponer=true llena los campos vacíos con lo que
+   sale del histórico; nada se guarda hasta que pulses Guardar. */
+function formTopes(proponer){
+  const actuales=S.presupuesto||{};
+  const prop=proponerTopes();
+  const usar=proponer?{...prop,...actuales}:actuales;
+  const hayProp=Object.keys(prop).length;
+  openModal(`<h2>🎯 Topes de gasto variable</h2>
+    <p style="color:var(--muted);font-size:.86rem;margin-bottom:14px;line-height:1.5">
+      Cuánto te permites gastar al mes en cada división, sin contar los fijos. Deja en blanco las que
+      no quieras vigilar.${hayProp?' A la derecha, la mediana de lo que gastaste en tus meses completos.':''}</p>
+    <div class="topes-grid">
+      ${S.catEgreso.map((c,i)=>`<label for="tp-${i}"><span class="dot" style="background:${colorDeCategoria(c)}"></span>${esc(c)}</label>
+        <input type="number" step="10000" min="0" class="icone-input" id="tp-${i}" data-cat="${esc(c)}" value="${usar[c]||''}" placeholder="—">
+        <span class="topes-hist">${prop[c]?fmtCOP(prop[c]):''}</span>`).join('')}
+    </div>
+    <div style="display:flex;gap:10px;margin-top:18px;justify-content:space-between;flex-wrap:wrap">
+      ${hayProp?`<button class="btn btn-outline" onclick="formTopes(true)">Llenar vacíos con el histórico</button>`:'<span></span>'}
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="saveTopes()">Guardar</button>
+      </div>
+    </div>`);
+}
+function saveTopes(){
+  const out={};
+  document.querySelectorAll('#modal-content [data-cat]').forEach(el=>{
+    const v=parseFloat(el.value);
+    if(!isNaN(v)&&v>0)out[el.dataset.cat]=Math.round(v);
+  });
+  S.presupuesto=out;
+  saveState();closeModal();rerender();toast(`✓ ${Object.keys(out).length} tope(s) guardado(s)`);
+}
+
+/* ═══════════════════════════════════════════════════════════
    ESCÁNER DE FACTURAS CON IA (visión de Claude)
    La imagen va del navegador al Edge Function `claude-proxy`,
    que guarda la ANTHROPIC_API_KEY como secreto del servidor.
@@ -4464,7 +4780,7 @@ function registrarSW(){
    que vuelve al frente (y cada 30 min) se compara la versión publicada con
    la que corre. Si cambió y no hay un formulario abierto, recarga sola; si
    lo hay, avisa y espera a que lo cierres, para no perder lo que escribías. */
-const APP_VERSION='v0.40';
+const APP_VERSION='v0.41';
 let _swReg=null,_buscandoVersion=false,_versionNueva=null;
 async function buscarVersionNueva(){
   if(_buscandoVersion||!navigator.onLine)return;
