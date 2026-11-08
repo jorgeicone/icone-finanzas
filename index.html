@@ -143,7 +143,6 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 }
 .badge.negocio{background:rgba(123,47,255,.18);color:#c9a8ff;border:1px solid rgba(123,47,255,.35)}
 .seg-sm button{padding:6px 11px;font-size:.78rem;gap:5px}
-.seg button.on.propuesto{border-style:dashed;background:rgba(255,140,0,.1);border-color:rgba(255,140,0,.45)}
 .solo-movil{display:none}
 @media (max-width:640px){.seg-sm{flex-direction:column;border-radius:14px}.seg-sm button{justify-content:flex-start}.col-cuenta{display:none}.solo-movil{display:block}.tabla-bolsillos th,.tabla-bolsillos td{padding:10px 5px}.tabla-bolsillos .amount{font-size:.8rem}.seg-sm button{padding:5px 8px;gap:4px;font-size:.74rem}}
 
@@ -322,7 +321,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.37</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.38</b></div>
       <div style="margin-top:2px">Build 2026-11-08</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -1290,7 +1289,7 @@ registerModule({
 
     return `
       <div class="kpi-grid">
-        ${S.saldos.length?`<button type="button" class="kpi kpi-btn" onclick="go('disponible')" aria-label="Disponible real: ${fmtCOP(disp.disponible)}. Ver el detalle"><div class="kpi-label">Disponible real</div><div class="kpi-value" style="color:${disp.disponible>=0?'inherit':'var(--red)'}">${fmtCOP(disp.disponible)}</div><div class="kpi-meta">de ${fmtCOP(hayProy?totalProy:totalSaldo)} en cuentas${disp.porConfirmar.length?' · <span style="color:var(--orange)">revisa tus bolsillos</span>':''}</div></button>`
+        ${S.saldos.length?`<button type="button" class="kpi kpi-btn" onclick="go('disponible')" aria-label="Disponible real: ${fmtCOP(disp.disponible)}. Ver el detalle"><div class="kpi-label">Disponible real</div><div class="kpi-value" style="color:${disp.disponible>=0?'inherit':'var(--red)'}">${fmtCOP(disp.disponible)}</div><div class="kpi-meta">de ${fmtCOP(hayProy?totalProy:totalSaldo)} en cuentas</div></button>`
           :`<div class="kpi"><div class="kpi-label">Saldo total</div><div class="kpi-value">${fmtCOP(0)}</div><div class="kpi-meta">${S.cuentas.length} cuenta(s)</div></div>`}
         <div class="kpi green"><div class="kpi-label">Ingresos del mes</div><div class="kpi-value">${fmtCOP(ingMes)}</div><div class="kpi-meta">${pctDelta(ingMes,ingPrev)}</div></div>
         <div class="kpi red"><div class="kpi-label">Egresos del mes</div><div class="kpi-value">${fmtCOP(egMes)}</div><div class="kpi-meta">${pctDelta(egMes,egPrev,true)}</div></div>
@@ -2723,20 +2722,22 @@ function aplicarPropuestaFijos(){
    ═══════════════════════════════════════════════════════════ */
 const DESTINOS=[
   {id:'libre',     etiqueta:'Libre',     icono:'🟢',ayuda:'para el gasto del día a día'},
-  {id:'ahorro',    etiqueta:'Ahorro',    icono:'🏦',ayuda:'tuyo, pero no para gastar'},
+  {id:'ahorro',    etiqueta:'Apartado',  icono:'🏦',ayuda:'tuyo, pero en un bolsillo: no para gastar'},
   {id:'compromiso',etiqueta:'Con dueño', icono:'🤝',ayuda:'ya está destinado a alguien o a algo'}
 ];
 /* El nombre es la clave, sin tildes ni mayúsculas: «Ahorro» en Nequi y
    «ahorro» en un corte viejo son el mismo bolsillo para efectos de destino. */
 const claveBolsillo=n=>String(n||'').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
-/* Propuesta inicial, que se muestra como tal hasta que la confirmes: lo que
-   se llama principal o de gasto diario es libre; todo bolsillo con otro
-   nombre se apartó a propósito, y se propone como ahorro. */
-function destinoPropuesto(n){
-  return /principal|diari|gasto|disponible|corriente|billetera/.test(claveBolsillo(n))?'libre':'ahorro';
+/* La regla es de Jorge: SOLO el bolsillo «Principal» es disponible. Todo lo
+   que esté en cualquier otro bolsillo se apartó a propósito —incluso uno de
+   gastos diarios— y no cuenta para gastar. Una cuenta sin bolsillos cuenta
+   entera como Principal. De los apartados solo se decide si son tuyos
+   (apartado) o ya tienen dueño (con dueño), y eso sí se guarda por nombre. */
+const esPrincipal=n=>claveBolsillo(n)==='principal';
+function destinoDe(n){
+  if(esPrincipal(n))return 'libre';
+  return (S.destinos||{})[claveBolsillo(n)]==='compromiso'?'compromiso':'ahorro';
 }
-function destinoDe(n){return (S.destinos||{})[claveBolsillo(n)]||destinoPropuesto(n)}
-function destinoConfirmado(n){return !!(S.destinos||{})[claveBolsillo(n)]}
 const iconoDestino=n=>(DESTINOS.find(d=>d.id===destinoDe(n))||DESTINOS[0]).icono;
 
 /* Los bolsillos de hoy: los del último corte de cada cuenta. Una cuenta sin
@@ -2796,26 +2797,15 @@ function calcularDisponible(){
   const disponible=liquido-ahorro-conDueno-compromisos-provision.total;
   const fijosPend=pendientesDelMes(monthKey()).reduce((a,e)=>a+e.esperado,0);
   return {liquido,bols,ahorro,conDueno,compromisos,provision,disponible,fijosPend,
-    libreTrasFijos:disponible-fijosPend,
-    porConfirmar:bols.filter(b=>!destinoConfirmado(b.n))};
+    libreTrasFijos:disponible-fijosPend};
 }
 
 function elegirDestino(clave,valor){
-  if(!DESTINOS.some(d=>d.id===valor))return;
+  if(valor!=='ahorro'&&valor!=='compromiso')return;   // un bolsillo nunca es disponible
   S.destinos=S.destinos||{};
   S.destinos[clave]=valor;
   saveState();rerender();
 }
-function confirmarDestinosPropuestos(){
-  S.destinos=S.destinos||{};
-  let n=0;
-  bolsillosActuales().forEach(b=>{
-    const k=claveBolsillo(b.n);
-    if(!S.destinos[k]){S.destinos[k]=destinoPropuesto(b.n);n++}
-  });
-  saveState();rerender();toast(`✓ ${n} bolsillo(s) confirmado(s)`);
-}
-
 registerModule({
   id:'disponible',label:'Disponible',icon:'🧭',sub:'Lo que de verdad puedes gastar',
   actions:`<button class="btn btn-outline btn-sm" onclick="formProvision()">⚙ Provisión</button>
@@ -2836,15 +2826,16 @@ registerModule({
     const paso=(k,v,cls,sub)=>`<div class="cascada-fila ${cls||''}"><span class="k">${k}${sub?`<small>${sub}</small>`:''}</span><span class="amount">${v}</span></div>`;
 
     const filaBolsillo=b=>{
-      const k=claveBolsillo(b.n),d=destinoDe(b.n),conf=destinoConfirmado(b.n);
+      const k=claveBolsillo(b.n),d=destinoDe(b.n);
       return `<tr>
         <td class="col-cuenta"><span class="dot" style="background:${esc(b.color||'#00d4ff')}"></span>${esc(b.cuenta)}</td>
-        <td><div style="font-weight:600">${esc(b.n)}</div><div class="solo-movil" style="color:var(--muted);font-size:.74rem"><span class="dot" style="background:${esc(b.color||'#00d4ff')}"></span>${esc(b.cuenta)}</div>${conf?'':'<div style="font-size:.72rem;color:var(--orange)">propuesto · confírmalo</div>'}</td>
+        <td><div style="font-weight:600">${esc(b.n)}</div><div class="solo-movil" style="color:var(--muted);font-size:.74rem"><span class="dot" style="background:${esc(b.color||'#00d4ff')}"></span>${esc(b.cuenta)}</div></td>
         <td style="text-align:right" class="amount">${fmtCOP(b.m)}</td>
-        <td><div class="seg seg-sm" data-k="${esc(k)}" role="radiogroup" aria-label="Destino de ${esc(b.n)} en ${esc(b.cuenta)}">
-          ${DESTINOS.map(x=>`<button type="button" role="radio" aria-checked="${x.id===d}" class="${x.id===d?'on':''}${x.id===d&&!conf?' propuesto':''}"
+        <td>${esPrincipal(b.n)?'<span class="badge green">🟢 Disponible</span>':`<div class="seg seg-sm" data-k="${esc(k)}" role="radiogroup" aria-label="Destino de ${esc(b.n)} en ${esc(b.cuenta)}">
+          ${DESTINOS.filter(x=>x.id!=='libre').map(x=>`<button type="button" role="radio" aria-checked="${x.id===d}" class="${x.id===d?'on':''}"
             title="${x.etiqueta}: ${x.ayuda}" onclick="elegirDestino(this.parentNode.dataset.k,'${x.id}')"><span aria-hidden="true">${x.icono}</span> ${x.etiqueta}</button>`).join('')}
-        </div></td></tr>`;
+        </div>`}
+        </td></tr>`;
     };
 
     return `
@@ -2852,21 +2843,16 @@ registerModule({
         <div class="kpi ${D.disponible>=0?'green':'red'}"><div class="kpi-label">Disponible real</div>
           <div class="kpi-value" style="color:${D.disponible>=0?'inherit':'var(--red)'}">${fmtCOP(D.disponible)}</div>
           <div class="kpi-meta">de ${fmtCOP(D.liquido)} en tus cuentas</div></div>
-        <div class="kpi"><div class="kpi-label">🏦 Ahorro</div><div class="kpi-value">${fmtCOP(D.ahorro)}</div><div class="kpi-meta">Tuyo, pero no para gastar</div></div>
+        <div class="kpi"><div class="kpi-label">🏦 Apartado</div><div class="kpi-value">${fmtCOP(D.ahorro)}</div><div class="kpi-meta">En bolsillos, no para gastar</div></div>
         <div class="kpi orange"><div class="kpi-label">🤝 Con dueño</div><div class="kpi-value">${fmtCOP(D.conDueno+D.compromisos)}</div><div class="kpi-meta">Bolsillos y compromisos</div></div>
         <div class="kpi"><div class="kpi-label">🧾 Provisión</div><div class="kpi-value">${fmtCOP(P.total)}</div><div class="kpi-meta">Seguridad social${P.pctRenta?' y renta':''}</div></div>
       </div>
-
-      ${D.porConfirmar.length?`<div class="card aviso-destinos">
-        <div><b>${D.porConfirmar.length} bolsillo(s) con destino propuesto.</b>
-        La cifra ya los cuenta así, pero el destino lo decides tú: revísalos abajo.</div>
-        <button class="btn btn-outline btn-sm" onclick="confirmarDestinosPropuestos()">Confirmar como están</button></div>`:''}
 
       <div class="grid-2">
         <div class="card"><h3>🧮 De lo que hay a lo que puedes gastar</h3>
           <div class="cascada">
             ${paso('Lo que hay en tus cuentas',fmtCOP(D.liquido),'','proyectado desde los cortes')}
-            ${paso('🏦 Bolsillos de ahorro',neg(D.ahorro),'menos')}
+            ${paso('🏦 Bolsillos apartados',neg(D.ahorro),'menos')}
             ${paso('🤝 Bolsillos con dueño',neg(D.conDueno),'menos')}
             ${paso('📌 Compromisos sin bolsillo',neg(D.compromisos),'menos')}
             ${paso('🧾 Provisión',neg(P.total),'menos',`${pctTxt} % de ${fmtCOP(P.baseMonto)} facturado`)}
@@ -2875,8 +2861,8 @@ registerModule({
             ${D.fijosPend?paso('Libre para el gasto variable',fmtCOP(D.libreTrasFijos),'total'):''}
           </div>
           <p style="color:var(--muted);font-size:.8rem;margin-top:12px;line-height:1.5">
-            Lo que registraste después de cada corte se descuenta de lo libre: se asume que el gasto
-            del día a día no sale de los bolsillos de ahorro.</p>
+            Solo cuenta como disponible lo que está en «Principal». Lo que registraste después de cada
+            corte se descuenta de ahí, porque el gasto del día a día no sale de los bolsillos.</p>
         </div>
 
         <div class="card"><h3>🧾 Provisión de seguridad social</h3>
@@ -2902,8 +2888,8 @@ registerModule({
 
       <div class="card" style="margin-top:18px"><h3>👛 Tus bolsillos · ¿para qué es cada uno?</h3>
         <p style="color:var(--muted);font-size:.82rem;margin:-4px 0 14px;line-height:1.5">
-          Salen del último corte de cada cuenta. El destino se guarda por nombre: si dos cuentas tienen un
-          bolsillo «Ahorro», lo decides una vez para los dos.</p>
+          Salen del último corte de cada cuenta. Solo «Principal» es disponible; todo lo que está en un
+          bolsillo queda fuera. Lo único que eliges es si es tuyo (apartado) o ya tiene dueño.</p>
         <div class="table-wrap"><table class="tabla-bolsillos">
           <thead><tr><th class="col-cuenta">Cuenta</th><th>Bolsillo</th><th style="text-align:right">Monto</th><th>Destino</th></tr></thead>
           <tbody>${D.bols.map(filaBolsillo).join('')}</tbody></table></div>
@@ -2912,7 +2898,7 @@ registerModule({
       <div class="card" style="margin-top:18px"><h3>📌 Compromisos sin bolsillo</h3>
         <p style="color:var(--muted);font-size:.82rem;margin:-4px 0 14px;line-height:1.5">
           Plata que está en lo libre pero ya tiene destino: algo que debes entregar, un pago que ya
-          prometiste. Si la tienes en un bolsillo aparte, márcalo «Con dueño» arriba en vez de anotarla aquí.</p>
+          prometiste. Si la tienes en un bolsillo aparte, ya está fuera del disponible: márcalo «Con dueño» arriba en vez de anotarla aquí.</p>
         ${(S.compromisos||[]).length?`<div class="table-wrap"><table>
           <thead><tr><th>Para qué</th><th>Cuándo</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>
           ${[...S.compromisos].sort((a,b)=>(a.fechaObjetivo||'9').localeCompare(b.fechaObjetivo||'9')).map(c=>`<tr>
