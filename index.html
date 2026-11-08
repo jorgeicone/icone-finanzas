@@ -321,7 +321,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.38</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.39</b></div>
       <div style="margin-top:2px">Build 2026-11-08</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -1246,6 +1246,7 @@ function closeModal(){
   if(typeof _voz!=='undefined'&&_voz&&_voz.escuchando){try{vozDetener()}catch(_){}}
   document.getElementById('modal-bg').classList.remove('active');
   if(_focoPrevio&&document.contains(_focoPrevio)){try{_focoPrevio.focus()}catch(_){}}
+  if(typeof _versionNueva!=='undefined'&&_versionNueva)setTimeout(aplicarVersionNueva,600);
   _focoPrevio=null;
 }
 function openImg(src){document.getElementById('img-modal-src').src=src;document.getElementById('img-modal').classList.add('active')}
@@ -4427,8 +4428,45 @@ document.addEventListener('mousemove',e=>{
    lo que ves. Si el navegador no lo soporta, la app funciona igual. */
 function registrarSW(){
   if(!('serviceWorker' in navigator))return;
-  navigator.serviceWorker.register('sw.js').catch(e=>console.warn('SW no registrado:',e.message));
+  /* updateViaCache:'none' para que el navegador nunca use su caché HTTP
+     al buscar un sw.js nuevo: GitHub Pages lo sirve con max-age=600. */
+  navigator.serviceWorker.register('sw.js',{updateViaCache:'none'})
+    .then(reg=>{_swReg=reg})
+    .catch(e=>console.warn('SW no registrado:',e.message));
 }
+
+/* ── Que el celular se entere de las versiones nuevas ─────────
+   La app instalada en el iPhone no se recarga al volver a abrirla: iOS la
+   saca del fondo con la página que tenía en memoria, así que podía quedarse
+   días en una versión vieja aunque la nueva ya estuviera publicada. Cada vez
+   que vuelve al frente (y cada 30 min) se compara la versión publicada con
+   la que corre. Si cambió y no hay un formulario abierto, recarga sola; si
+   lo hay, avisa y espera a que lo cierres, para no perder lo que escribías. */
+const APP_VERSION='v0.39';
+let _swReg=null,_buscandoVersion=false,_versionNueva=null;
+async function buscarVersionNueva(){
+  if(_buscandoVersion||!navigator.onLine)return;
+  _buscandoVersion=true;
+  try{
+    if(_swReg)_swReg.update().catch(()=>{});
+    const r=await fetch('./?version='+Date.now(),{cache:'no-store'});
+    if(!r.ok)return;
+    const m=(await r.text()).match(/const APP_VERSION='(v[0-9.]+)'/);
+    if(m&&m[1]!==APP_VERSION){_versionNueva=m[1];aplicarVersionNueva()}
+  }catch(_){/* sin red: se intenta la próxima vez */}
+  finally{_buscandoVersion=false}
+}
+function aplicarVersionNueva(){
+  if(!_versionNueva)return;
+  const ocupado=document.getElementById('modal-bg').classList.contains('active')
+    ||(typeof _subida!=='undefined'&&_subida&&_subida.activa)
+    ||(typeof _colaCorriendo!=='undefined'&&_colaCorriendo);   // fotos subiendo en segundo plano
+  if(!ocupado){location.reload();return}
+  toast(`Hay una versión nueva (${_versionNueva}). Se aplica al cerrar lo que tienes abierto.`);
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')buscarVersionNueva()});
+window.addEventListener('pageshow',e=>{if(e.persisted)buscarVersionNueva()});
+setInterval(buscarVersionNueva,30*60*1000);
 
 (async function init(){
   loadState();

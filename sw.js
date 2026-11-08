@@ -21,7 +21,7 @@
                  guardarlas sería servir saldos viejos, o los de otra sesión.
    ============================================================ */
 
-const VERSION = 'v0.38';
+const VERSION = 'v0.39';
 const CACHE = 'icone-finanzas-' + VERSION;
 
 const ESENCIALES = [
@@ -74,7 +74,9 @@ self.addEventListener('fetch', e => {
   if (req.mode === 'navigate' || req.destination === 'document') {
     e.respondWith((async () => {
       try {
-        const fresca = await fetch(req);
+        /* no-store: sin esto el navegador podía servir el HTML de su caché HTTP
+           (GitHub Pages manda max-age=600) y la versión nueva tardaba en verse. */
+        const fresca = await fetch(req, { cache: 'no-store' });
         const c = await caches.open(CACHE);
         c.put('./index.html', fresca.clone());
         return fresca;
