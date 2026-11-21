@@ -342,7 +342,7 @@ tbody tr:hover{background:rgba(0,212,255,.04)}
     </button>
 
     <div style="margin-top:14px;padding:10px 12px;font-size:.7rem;color:rgba(255,255,255,.35);text-align:center;border-top:1px solid rgba(255,255,255,.06)">
-      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.41</b></div>
+      <div>ICONE Finanzas <b style="color:var(--cyan)">v0.42</b></div>
       <div style="margin-top:2px">Build 2026-11-08</div>
       <div style="margin-top:6px;line-height:1.5">© 2026 Jorge Hugo Pérez Gaona<br><span style="color:rgba(255,255,255,.28)">ICONE ialabs · Todos los derechos reservados</span></div>
     </div>
@@ -542,9 +542,13 @@ function recordarAmbito(tipo,v){
    pase, y cubre de una vez los tres sitios que sobreescriben el estado:
    carga local, sincronización con la nube y restauración de respaldo. */
 function normalizeState(){
-  ['cuentas','saldos','ingresos','egresos','traslados','recurrentes','compromisos','catIngreso','catEgreso','metodos'].forEach(k=>{
+  ['cuentas','saldos','ingresos','egresos','traslados','recurrentes','compromisos','catIngreso','catEgreso','metodos','borrados'].forEach(k=>{
     if(!Array.isArray(S[k]))S[k]=[];
   });
+  /* Sellos de grupo: la hora en que cambió cada bloque de configuración.
+     Sin esto la fusión no sabría cuál de dos versiones de los topes es la
+     reciente. */
+  if(!S.tsg||typeof S.tsg!=='object'||Array.isArray(S.tsg))S.tsg={};
   if(!S.subcatEgreso||typeof S.subcatEgreso!=='object')S.subcatEgreso={};
   if(!S.destinos||typeof S.destinos!=='object'||Array.isArray(S.destinos))S.destinos={};
   if(!S.presupuesto||typeof S.presupuesto!=='object'||Array.isArray(S.presupuesto))S.presupuesto={};
@@ -560,6 +564,9 @@ function loadState(){
   }catch(e){console.error(e)}
   normalizeState();
   migrarTaxonomia();
+  /* La foto de partida. Lo que ya estaba queda sin sello —vale como
+     «antiguo»— y solo se sella lo que toques desde ahora. */
+  _snap=tomarSnapshot();
 }
 
 /* Equivalencias de la taxonomía vieja (9 categorías caseras) a COICOP.
@@ -658,10 +665,215 @@ function aprenderSubcategoria(cat,sub){
   const yaEsta=S.subcatEgreso[cat].some(x=>x.toLowerCase()===sub.toLowerCase());
   if(!yaEsta)S.subcatEgreso[cat].push(sub);
 }
-function saveState(){
+/* ═══════════════════════════════════════════════════════════
+   SELLOS DE TIEMPO Y FUSIÓN — para que dos aparatos coincidan
+
+   El problema que resuelve: hasta la v0.41 la sincronización elegía un
+   GANADOR. Comparaba cuántos registros tenía cada lado y el que tuviera
+   más pisaba al otro entero. Eso falla de cuatro maneras distintas:
+
+   1. El conteo ignoraba los fijos, las cuentas, los destinos de bolsillos
+      y los topes. Anotar un egreso en el celular lo volvía «el que va
+      adelante» y borraba los 7 fijos declarados en el computador.
+   2. Comparaba el reloj del teléfono contra el reloj del servidor. Unos
+      segundos de desfase vuelven a un aparato ganador permanente.
+   3. Si justo había una bajada en curso, la subida se cancelaba en
+      silencio y nadie la reprogramaba: lo guardado se quedaba en ese
+      aparato y nunca llegaba al otro.
+   4. En iOS, `beforeunload` casi nunca se dispara, así que lo último que
+      anotabas en el iPhone no alcanzaba a subir.
+
+   La solución no es contar mejor: es dejar de elegir. Cada registro lleva
+   su propia hora de modificación (`ts`), y al sincronizar se UNEN los dos
+   lados registro por registro. Un egreso que solo existe en el celular y
+   un fijo que solo existe en el computador sobreviven los dos, porque
+   nunca compiten: son registros distintos. Solo cuando el MISMO registro
+   cambió en los dos lados hay que decidir, y ahí gana el más reciente.
+
+   Los sellos se ponen en un solo sitio —al guardar, comparando contra lo
+   último guardado— y no en cada formulario. Así cubre también las
+   importaciones masivas y cualquier formulario que se escriba después,
+   sin que haya que acordarse de sellar a mano.
+   ═══════════════════════════════════════════════════════════ */
+
+/* Las colecciones de registros con id propio. Se fusionan por id. */
+const COLECCIONES=['cuentas','saldos','ingresos','egresos','traslados','recurrentes','compromisos'];
+/* Los grupos de configuración: no tienen id, se fusionan por clave. */
+const GRUPOS=['destinos','presupuesto','subcatEgreso','config','catIngreso','catEgreso','metodos'];
+
+let _snap=null;          // última foto de lo guardado, para detectar cambios
+let _sucio=false;        // hay cambios locales sin confirmar en la nube
+
+/* Un registro sin su sello: lo que se compara para saber si cambió.
+   El sello se excluye a propósito, porque si entrara en la comparación
+   cada guardado se vería distinto del anterior y se sellaría en bucle. */
+function sinSello(r){const c={...r};delete c.ts;return JSON.stringify(c)}
+
+function tomarSnapshot(){
+  const o={_g:{}};
+  COLECCIONES.forEach(k=>{
+    o[k]={};
+    (S[k]||[]).forEach(r=>{if(r&&r.id)o[k][r.id]=sinSello(r)});
+  });
+  GRUPOS.forEach(k=>{o._g[k]=JSON.stringify(S[k]||null)});
+  o._mods=JSON.stringify(modulesCustom||[]);
+  return o;
+}
+
+/* Lápidas: un borrado tiene que viajar como un hecho, porque si no el
+   otro aparato lo resucita en la siguiente fusión. Se guardan 120 días
+   —de sobra para que cualquier aparato se entere— y luego se podan. */
+function ponerLapida(id,ahora){
+  S.borrados=S.borrados||[];
+  const y=S.borrados.find(b=>b.id===id);
+  if(y)y.ts=ahora; else S.borrados.push({id,ts:ahora});
+}
+function podarLapidas(){
+  const limite=Date.now()-120*864e5;
+  if(Array.isArray(S.borrados))S.borrados=S.borrados.filter(b=>b&&b.ts>limite);
+}
+
+/* Sella lo que cambió desde el último guardado y deja lápida de lo que
+   desapareció. En el primer guardado tras instalar esta versión no hay
+   foto previa, así que no se sella nada: los registros viejos quedan sin
+   sello (que vale como «antiguo») y solo se sella lo que toques de aquí
+   en adelante. Sellarlos todos haría que el primer aparato en abrir la
+   app se declarara dueño de todo. */
+function sellarCambios(){
+  if(!_snap){_snap=tomarSnapshot();return}
+  const ahora=Date.now();
+  COLECCIONES.forEach(k=>{
+    const prev=_snap[k]||{};
+    const vivos=new Set();
+    (S[k]||[]).forEach(r=>{
+      if(!r||!r.id)return;
+      vivos.add(r.id);
+      const json=sinSello(r);
+      if(prev[r.id]===undefined||prev[r.id]!==json)r.ts=ahora;
+    });
+    Object.keys(prev).forEach(id=>{if(!vivos.has(id))ponerLapida(id,ahora)});
+  });
+  /* Los grupos de configuración se sellan completos: cambian poco y casi
+     nunca desde dos aparatos a la vez, así que un sello por grupo basta
+     y evita guardar una hora por cada tope. */
+  S.tsg=S.tsg||{};
+  GRUPOS.forEach(k=>{
+    const json=JSON.stringify(S[k]||null);
+    if(_snap._g[k]!==json)S.tsg[k]=ahora;
+  });
+  if(_snap._mods!==JSON.stringify(modulesCustom||[]))S.tsg._mods=ahora;
+  podarLapidas();
+  _snap=tomarSnapshot();
+}
+
+const selloDe=r=>+(r&&r.ts)||0;
+
+/* ── La fusión ─────────────────────────────────────────────
+   Une lo de este aparato con lo de la nube. Nunca elige un lado entero:
+   recorre registro por registro. Devuelve también un resumen, para poder
+   decir qué pasó en vez de que sea magia. */
+function fusionarEstados(local,nube,modsNube){
+  const out={...local,...nube};      // base: las claves que solo tiene un lado
+  const res={bajados:0,subenFaltantes:0,enConflicto:0,borradosAplicados:0,localAporta:false};
+
+  /* Lápidas de los dos lados juntas: un borrado hecho en el celular tiene
+     que borrar también en el computador. */
+  const lapidas={};
+  [...(Array.isArray(local.borrados)?local.borrados:[]),
+   ...(Array.isArray(nube.borrados)?nube.borrados:[])].forEach(b=>{
+    if(b&&b.id)lapidas[b.id]=Math.max(lapidas[b.id]||0,+b.ts||0);
+  });
+
+  COLECCIONES.forEach(k=>{
+    const a=Array.isArray(local[k])?local[k]:[];
+    const b=Array.isArray(nube[k])?nube[k]:[];
+    const mapa=new Map();
+    a.forEach(r=>{if(r&&r.id)mapa.set(r.id,{r,lado:'local'})});
+    b.forEach(r=>{
+      if(!r||!r.id)return;
+      const y=mapa.get(r.id);
+      if(!y){mapa.set(r.id,{r,lado:'nube'});res.bajados++;return}
+      /* El mismo registro en los dos lados. Si son idénticos no hay nada
+         que decidir; si no, gana el sello más reciente. */
+      if(sinSello(y.r)===sinSello(r))return;
+      res.enConflicto++;
+      if(selloDe(r)>selloDe(y.r))mapa.set(r.id,{r,lado:'nube'});
+      else res.localAporta=true;
+    });
+    /* Y ahora los borrados: fuera todo registro con lápida más nueva que
+       su última modificación. Si el registro se volvió a tocar DESPUÉS de
+       borrarlo, se queda: lo último que hiciste manda. */
+    const vivos=[];
+    mapa.forEach((v,id)=>{
+      const lap=lapidas[id]||0;
+      if(lap&&lap>=selloDe(v.r)){res.borradosAplicados++;return}
+      vivos.push(v);
+    });
+    out[k]=vivos.map(v=>v.r);
+    const soloAqui=vivos.filter(v=>v.lado==='local'&&!b.some(x=>x&&x.id===v.r.id)).length;
+    res.subenFaltantes+=soloAqui;
+    if(soloAqui)res.localAporta=true;
+  });
+
+  out.borrados=Object.entries(lapidas).map(([id,ts])=>({id,ts}));
+  /* Un borrado que solo conoce este aparato también hay que subirlo, o el
+     otro lado lo resucita en la siguiente fusión. */
+  if(Object.keys(lapidas).length>((Array.isArray(nube.borrados)?nube.borrados:[]).length))res.localAporta=true;
+
+  /* Los grupos de configuración: unión de claves. Lo que solo tiene un
+     lado entra sin pelear —que es el caso real: los topes los pusiste en
+     el computador y el celular no tiene ninguno—, y lo que está en los
+     dos con valores distintos lo resuelve el sello del grupo. */
+  const tsgL=(local.tsg||{}),tsgN=(nube.tsg||{});
+  out.tsg={...tsgL};
+  GRUPOS.forEach(k=>{
+    const vL=local[k],vN=nube[k];
+    const tL=+tsgL[k]||0,tN=+tsgN[k]||0;
+    out.tsg[k]=Math.max(tL,tN);
+    if(tL>tN)res.localAporta=true;
+    if(vL==null){out[k]=vN;return}
+    if(vN==null){out[k]=vL;return}
+    if(Array.isArray(vL)||Array.isArray(vN)){
+      /* Listas de texto (categorías, métodos): unión conservando el orden.
+         Son aditivas por naturaleza; perder una categoría porque el otro
+         aparato no la conocía sería peor que tener una de más. */
+      const u=[...(Array.isArray(vL)?vL:[])];
+      (Array.isArray(vN)?vN:[]).forEach(x=>{if(!u.includes(x))u.push(x)});
+      out[k]=u;return;
+    }
+    if(typeof vL==='object'&&typeof vN==='object'){
+      const nuevo=tN>tL?{...vL,...vN}:{...vN,...vL};
+      out[k]=nuevo;return;
+    }
+    out[k]=tN>tL?vN:vL;
+  });
+
+  /* Módulos personalizados: por id, igual que los registros. */
+  const mL=Array.isArray(modulesCustom)?modulesCustom:[];
+  const mN=Array.isArray(modsNube)?modsNube:[];
+  const mm=new Map();
+  mL.forEach(m=>{if(m&&m.id)mm.set(m.id,m)});
+  mN.forEach(m=>{
+    if(!m||!m.id)return;
+    const y=mm.get(m.id);
+    if(!y){mm.set(m.id,m);return}
+    if((+tsgN._mods||0)>(+tsgL._mods||0))mm.set(m.id,m);
+  });
+  out.tsg._mods=Math.max(+tsgL._mods||0,+tsgN._mods||0);
+  res.modules=[...mm.values()];
+  res.estado=out;
+  return res;
+}
+
+function guardarLocal(){
   localStorage.setItem(STORE_KEY,JSON.stringify(S));
   localStorage.setItem(STORE_KEY+'_modules',JSON.stringify(modulesCustom));
   localStorage.setItem(STORE_KEY+'_ts',Date.now().toString());
+}
+function saveState(){
+  sellarCambios();
+  guardarLocal();
+  _sucio=true;
   scheduleCloudSync();
 }
 
@@ -707,14 +919,29 @@ async function initSupabase(){
   if(currentUser){await pullFromCloud()}else{setSyncStatus('local')}
 }
 
-/* Cuántos registros trae un estado, de verdad.
-   La comparación anterior solo contaba S.saldos, así que un celular con tres
-   egresos nuevos y los mismos cortes empataba con el PC y perdía los tres. */
+/* Cuántos registros trae un estado, de verdad. Ya no decide nada —eso lo
+   hace la fusión— pero sirve para saber si una cuenta está vacía y para
+   mostrar el detalle en Configuración.
+
+   Contaba solo cinco colecciones: faltaban las cuentas y los fijos, así que
+   declarar siete gastos fijos no movía el conteo ni un registro. */
+function contarPorColeccion(e){
+  const o={};
+  COLECCIONES.forEach(k=>{o[k]=Array.isArray(e&&e[k])?e[k].length:0});
+  return o;
+}
 function contarRegistros(e){
-  const n=k=>Array.isArray(e&&e[k])?e[k].length:0;
-  return n('saldos')+n('ingresos')+n('egresos')+n('traslados')+n('compromisos');
+  const c=contarPorColeccion(e);
+  return COLECCIONES.reduce((a,k)=>a+c[k],0);
 }
 
+/* Bajar ya no es «traer la versión de la nube»: es FUSIONAR. Se trae lo de
+   la nube, se une con lo de aquí registro por registro, y si este aparato
+   aportó algo que allá no estaba, se vuelve a subir el resultado. Por eso
+   los dos aparatos terminan iguales sin que ninguno pise al otro.
+
+   `forceOverwrite` sigue existiendo para una sola cosa: traer la nube tal
+   cual, descartando lo local, cuando tú lo pides a propósito. */
 async function pullFromCloud(forceOverwrite=false){
   if(!currentUser||!sb)return;
   setSyncStatus('pulling');
@@ -743,99 +970,91 @@ async function pullFromCloud(forceOverwrite=false){
     }
 
     const cloudTs=new Date(data.updated_at).getTime();
-    const localTs=parseInt(localStorage.getItem(STORE_KEY+'_ts')||'0');
-    const nLocal=contarRegistros(S), nCloud=contarRegistros(data.data);
 
-    if(!forceOverwrite){
-      // Este dispositivo va adelante y bajar no le quitaría nada: sube.
-      if(localTs>cloudTs && nLocal>=nCloud){
-        isPulling=false;
-        await pushToCloud();
-        toast('⬆️ Este dispositivo iba adelante: se subió a la nube');
-        return;
-      }
-      /* Bajar borraría registros que solo existen aquí. Antes se hacía en
-         silencio, y así es como desaparecían movimientos recién anotados.
-         La app ya no elige por ti: pregunta cuál de las dos versiones vale. */
-      if(nCloud<nLocal){
-        isPulling=false;
-        return avisarConflicto(data,nLocal,nCloud,cloudTs);
-      }
+    if(forceOverwrite){
+      aplicarEstadoDeLaNube(data,cloudTs);
+      toast('☁️ Se aplicó la versión de la nube');
+      return;
     }
 
-    aplicarEstadoDeLaNube(data,cloudTs);
-    toast('☁️ Datos descargados de la nube');
+    const R=fusionarEstados(S,data.data,data.modules||[]);
+    S=R.estado;
+    modulesCustom=R.modules;
+    normalizeState();
+    migrarTaxonomia();   // los datos de la nube pueden venir con la taxonomía vieja
+    _snap=tomarSnapshot();
+    guardarLocal();
+    _ultimaFusion={...R,cuando:Date.now()};
+    rerender();
+    isPulling=false;
+
+    if(R.localAporta){
+      /* Este aparato tenía algo que la nube no: el resultado de la fusión
+         sube, y así el otro aparato lo recibe en su próxima bajada. */
+      await pushToCloud();
+      setSyncStatus('synced','Fusionado y subido');
+    }else{
+      setSyncStatus('synced','Actualizado '+new Date(cloudTs).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}));
+      _sucio=false;
+    }
+
+    if(R.bajados||R.borradosAplicados){
+      const partes=[];
+      if(R.bajados)partes.push(`${R.bajados} registro(s) del otro dispositivo`);
+      if(R.borradosAplicados)partes.push(`${R.borradosAplicados} borrado(s)`);
+      toast('☁️ Se trajo '+partes.join(' y '));
+    }
   }catch(err){
     console.error('Pull error:',err);
     setSyncStatus('error',err.message);
-  }finally{isPulling=false}
+  }finally{
+    isPulling=false;
+    /* Si mientras bajábamos guardaste algo, su subida quedó en cola. Antes
+       se cancelaba en silencio y nadie la reprogramaba: por eso un cambio
+       podía quedarse para siempre en un solo aparato. */
+    if(_pushPendiente){_pushPendiente=false;pushToCloud()}
+  }
 }
 
+/* Último resultado de fusión, para poder mostrarlo en Configuración. */
+let _ultimaFusion=null;
+
+/* Traer la nube tal cual, descartando lo de aquí. Solo cuando se pide
+   a propósito: la ruta normal fusiona. */
 function aplicarEstadoDeLaNube(data,cloudTs){
   S={...S,...data.data};
   normalizeState();
   modulesCustom=data.modules||[];
-  migrarTaxonomia();   // los datos de la nube pueden venir con la taxonomía vieja
-  localStorage.setItem(STORE_KEY,JSON.stringify(S));
-  localStorage.setItem(STORE_KEY+'_modules',JSON.stringify(modulesCustom));
+  migrarTaxonomia();
+  _snap=tomarSnapshot();
+  guardarLocal();
   localStorage.setItem(STORE_KEY+'_ts',cloudTs.toString());
+  _sucio=false;
   rerender();
   setSyncStatus('synced','Actualizado '+new Date(cloudTs).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}));
 }
 
-/* Los dos lados avanzaron por caminos distintos y no hay manera de saber
-   cuál quieres sin preguntar. Se muestran las dos cuentas de registros para
-   que la decisión se tome mirando números, no adivinando. */
-let _conflicto=null;
-function avisarConflicto(data,nLocal,nCloud,cloudTs){
-  _conflicto={data,cloudTs};
-  setSyncStatus('error','Hay dos versiones distintas');
-  openModal(`<h2>⚠️ Dos versiones distintas de tus datos</h2>
-    <p style="color:var(--muted);font-size:.9rem;line-height:1.6;margin-bottom:14px">
-      La copia de la nube es más reciente, pero tiene <b>menos registros</b> que la de este
-      dispositivo. Suele pasar cuando anotaste algo aquí y otro aparato subió su versión después.
-      Elige tú: bajar la de la nube borraría lo que solo existe aquí.
-    </p>
-    <div class="proy-box" style="margin-bottom:14px">
-      <div><span class="k">En este dispositivo</span><span class="amount">${nLocal} registro(s)</span></div>
-      <div><span class="k">En la nube</span><span class="amount">${nCloud} registro(s)</span></div>
-      <div style="border-top:1px solid rgba(255,255,255,.14);padding-top:7px;margin-top:2px">
-        <span class="k">Se perderían al bajar</span><span class="amount neg">${nLocal-nCloud}</span></div>
-    </div>
-    <p style="color:var(--muted);font-size:.78rem;line-height:1.5">
-      Pase lo que pase, la versión anterior queda guardada en el historial de respaldos de la nube.
-    </p>
-    <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;flex-wrap:wrap">
-      <button class="btn btn-ghost" onclick="resolverConflicto('nube')">Traer la de la nube</button>
-      <button class="btn btn-primary" onclick="resolverConflicto('local')">Conservar la de aquí y subirla</button>
-    </div>`);
-}
-
-async function resolverConflicto(cual){
-  const c=_conflicto;_conflicto=null;closeModal();
-  if(!c)return;
-  if(cual==='nube'){
-    aplicarEstadoDeLaNube(c.data,c.cloudTs);
-    toast('☁️ Se aplicó la versión de la nube');
-  }else{
-    await pushToCloud();
-    toast('⬆️ Se conservó lo de este dispositivo');
-  }
-}
-
+/* Subida en cola: si justo hay una bajada en curso, la subida NO se
+   descarta —antes se perdía ahí mismo— sino que queda anotada y corre en
+   cuanto la bajada termina. */
+let _pushPendiente=false;
 async function pushToCloud(){
-  if(!currentUser||!sb||isPulling)return;
+  if(!currentUser||!sb)return;
+  if(isPulling){_pushPendiente=true;return}
   setSyncStatus('syncing');
   try{
     const {error}=await sb.from('finanzas_data').upsert({user_id:currentUser.id,data:S,modules:modulesCustom},{onConflict:'user_id'});
     if(error)throw error;
     const now=new Date();
     localStorage.setItem(STORE_KEY+'_ts',now.getTime().toString());
+    _sucio=false;
     setSyncStatus('synced','☁️ Subido '+now.toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',second:'2-digit'}));
   }catch(err){
     console.error('Push error:',err);
     setSyncStatus(navigator.onLine?'error':'offline',err.message);
     toast('⚠️ No se subió a la nube: '+err.message,'error');
+    /* Queda sucio a propósito: así el próximo guardado, el regreso al
+       frente o el cierre de la app vuelven a intentarlo. */
   }
 }
 
@@ -852,9 +1071,13 @@ function scheduleCloudSync(){
    la petición llegaba anónima, RLS la rechazaba y el .catch() se tragaba el
    error. Ahora se usa el token que initSupabase mantiene al día, y si no hay
    token no se intenta: mejor no llamar que fingir que se guardó. */
-window.addEventListener('beforeunload',()=>{
-  if(!currentUser||!syncTimer||!accessToken)return;
-  clearTimeout(syncTimer);syncTimer=null;
+/* La condición era `!syncTimer`: solo subía si el temporizador de 200 ms
+   seguía pendiente. En iOS eso casi nunca es cierto —el temporizador ya
+   corrió y su subida pudo fallar— así que se usa `_sucio`, que dice lo que
+   de verdad importa: hay cambios locales que la nube todavía no tiene. */
+function subidaDeEmergencia(){
+  if(!currentUser||!accessToken||!_sucio)return;
+  if(syncTimer){clearTimeout(syncTimer);syncTimer=null}
   try{
     // sendBeacon no permite headers propios, así que va fetch con keepalive:
     // el navegador la mantiene viva aunque la página ya se haya cerrado.
@@ -870,13 +1093,25 @@ window.addEventListener('beforeunload',()=>{
       keepalive:true
     }).catch(()=>{});
   }catch(e){}
-});
+}
 
-// Sincronizar al volver al foreground (tab activo de nuevo)
+/* Tres eventos para lo mismo, porque ninguno es confiable solo:
+   `beforeunload` no se dispara en iOS cuando sacas la app con el gesto o
+   la matas desde el conmutador —y era el único que había, así que lo
+   último anotado en el iPhone se quedaba sin subir—; `pagehide` sí llega
+   en Safari; y `visibilitychange` a oculto cubre el caso de cambiar de app
+   sin cerrarla, que es como se usa el celular de verdad. */
+window.addEventListener('beforeunload',subidaDeEmergencia);
+window.addEventListener('pagehide',subidaDeEmergencia);
+
 document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState==='visible'&&currentUser){
-    pullFromCloud();
-  }
+  if(!currentUser)return;
+  if(document.visibilityState==='hidden'){subidaDeEmergencia();return}
+  /* Al volver al frente: primero lo que quedó sin subir de aquí, y después
+     se baja y fusiona. En ese orden, porque bajar primero y subir después
+     dejaría la subida pisando una fusión que ya era correcta. */
+  if(_sucio)pushToCloud().then(()=>pullFromCloud());
+  else pullFromCloud();
 });
 
 function avisarCuentaVacia(){
@@ -970,7 +1205,12 @@ async function manualRefresh(){
   }
   const btn=document.getElementById('refresh-btn');
   if(btn){btn.style.pointerEvents='none';btn.innerHTML='⏳ Bajando...'}
-  await pullFromCloud(true); // force overwrite con los datos de la nube
+  /* Fusiona, no sobreescribe. Antes bajaba con forceOverwrite y descartaba
+     en silencio lo que solo existía en este aparato: un botón que se llama
+     «Refrescar» no debería poder borrar el egreso que acabas de anotar.
+     Para descartar lo local a propósito está «Rehacer la copia local» en
+     Configuración, que sí avisa. */
+  await pullFromCloud();
   if(btn){btn.style.pointerEvents='';btn.innerHTML='🔄 Refrescar'}
 }
 
@@ -4316,6 +4556,63 @@ registerModule({
 /* ===================================================
    CONFIGURACIÓN / BACKUP
    =================================================== */
+/* ── Comparar este aparato contra la nube ──────────────────
+   Nació de un caso concreto: el iPhone mostraba saldos más altos que el
+   computador y no había manera de saber por qué sin abrir la consola. Un
+   conteo por colección, lado a lado, responde en un segundo si el problema
+   es que falta bajar, que falta subir, o que de verdad hay dos versiones. */
+function resumenUltimaFusion(){
+  if(!_ultimaFusion)return '';
+  const R=_ultimaFusion;
+  const partes=[];
+  if(R.bajados)partes.push(`${R.bajados} registro(s) traído(s) del otro dispositivo`);
+  if(R.subenFaltantes)partes.push(`${R.subenFaltantes} que solo existía(n) aquí y se subió(eron)`);
+  if(R.enConflicto)partes.push(`${R.enConflicto} que estaba(n) distinto(s) en los dos lados`);
+  if(R.borradosAplicados)partes.push(`${R.borradosAplicados} borrado(s) aplicado(s)`);
+  return `<p style="color:var(--muted);font-size:.82rem;line-height:1.5">
+    Última sincronización: ${new Date(R.cuando).toLocaleString('es-CO')}.
+    ${partes.length?partes.join(' · '):'No hubo nada que mover: los dos lados ya estaban iguales.'}</p>`;
+}
+
+async function compararConLaNube(){
+  const est=document.getElementById('cmp-estado');
+  const tab=document.getElementById('cmp-tabla');
+  if(!currentUser||!sb){if(est)est.textContent='Primero inicia sesión.';return}
+  if(est)est.textContent='Consultando la nube…';
+  try{
+    const {data,error}=await sb.from('finanzas_data').select('*').eq('user_id',currentUser.id).maybeSingle();
+    if(error)throw error;
+    const nube=(data&&data.data)||{};
+    const aqui=contarPorColeccion(S),alla=contarPorColeccion(nube);
+    const ETIQ={cuentas:'Cuentas',saldos:'Cortes de saldo',ingresos:'Ingresos',egresos:'Egresos',
+      traslados:'Traslados',recurrentes:'Gastos fijos',compromisos:'Compromisos'};
+    const filas=COLECCIONES.map(k=>{
+      const d=aqui[k]-alla[k];
+      const color=d===0?'var(--green)':'var(--orange)';
+      const nota=d===0?'igual':(d>0?`${d} solo aquí`:`${-d} solo en la nube`);
+      return `<tr><td>${ETIQ[k]||k}</td>
+        <td style="text-align:right" class="amount">${aqui[k]}</td>
+        <td style="text-align:right" class="amount">${alla[k]}</td>
+        <td style="color:${color};font-size:.82rem">${nota}</td></tr>`;
+    }).join('');
+    const difs=COLECCIONES.filter(k=>aqui[k]!==alla[k]).length;
+    const cuando=data&&data.updated_at?new Date(data.updated_at).toLocaleString('es-CO'):'—';
+    if(est)est.innerHTML=difs
+      ? `<span style="color:var(--orange)">Hay diferencias en ${difs} colección(es).</span>`
+      : `<span style="color:var(--green)">Todo coincide.</span>`;
+    tab.innerHTML=`<div class="table-wrap"><table>
+      <thead><tr><th>Qué</th><th style="text-align:right">Aquí</th><th style="text-align:right">En la nube</th><th></th></tr></thead>
+      <tbody>${filas}</tbody></table></div>
+      <p style="color:var(--muted);font-size:.8rem;margin-top:10px;line-height:1.5">
+        La nube se guardó por última vez el ${cuando}.
+        ${difs?'Pulsa «Bajar de la nube» arriba: al bajar se <b>fusionan</b> los dos lados, no se pisa ninguno.':''}
+      </p>
+      ${resumenUltimaFusion()}`;
+  }catch(err){
+    if(est)est.innerHTML=`<span style="color:var(--red)">No se pudo consultar: ${esc(err.message)}</span>`;
+  }
+}
+
 function renderConfig(){
   document.getElementById('page-title').textContent='Configuración';
   document.getElementById('page-sub').textContent='Categorías, respaldo y datos';
@@ -4353,6 +4650,20 @@ function renderConfig(){
         <div id="login-status"></div>
       `}
     </div>
+
+    ${currentUser?`
+    <div class="card" style="margin-bottom:18px">
+      <h3>🔍 ¿Coinciden tus dispositivos?</h3>
+      <p style="color:var(--muted);font-size:.9rem;margin-bottom:12px">
+        Compara registro por registro lo que hay en este aparato contra lo que hay en la nube.
+        Si algo no cuadra, se ve aquí en vez de tener que adivinarlo mirando cifras.
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-outline" onclick="compararConLaNube()">Comparar ahora</button>
+        <div id="cmp-estado" style="font-size:.86rem;color:var(--muted);flex:1;min-width:180px"></div>
+      </div>
+      <div id="cmp-tabla" style="margin-top:12px">${resumenUltimaFusion()}</div>
+    </div>`:''}
 
     <div class="card" style="margin-bottom:18px">
       <h3>🧾 Respaldo de los recibos</h3>
@@ -4780,7 +5091,7 @@ function registrarSW(){
    que vuelve al frente (y cada 30 min) se compara la versión publicada con
    la que corre. Si cambió y no hay un formulario abierto, recarga sola; si
    lo hay, avisa y espera a que lo cierres, para no perder lo que escribías. */
-const APP_VERSION='v0.41';
+const APP_VERSION='v0.42';
 let _swReg=null,_buscandoVersion=false,_versionNueva=null;
 async function buscarVersionNueva(){
   if(_buscandoVersion||!navigator.onLine)return;
